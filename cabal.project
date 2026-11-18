@@ -6,5 +6,4 @@ packages:
   examples/members-server
 
 tests: True
-
 -- PostgreSQL fixtures resolve the released ephemeral-pg >=0.3.1 && <0.4.
