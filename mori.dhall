@@ -4,6 +4,7 @@ let Schema =
 
 in  Schema.Project::{ project =
       Schema.ProjectIdentity::{ name = "relay-pagination"
+        , stableId = Some "project_01m7k1w95eevwb9z2yh0jjp4hy"
       , namespace = "shinzui"
       , type = Schema.PackageType.Library
       , description = Some
