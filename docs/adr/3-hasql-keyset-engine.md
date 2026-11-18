@@ -1,8 +1,17 @@
-# ADR 3: Hasql keyset engine — predicate form, fingerprint, and v1 restrictions
+---
+type: Architecture Decision Record
+title: Hasql keyset engine — predicate form, fingerprint, and v1 restrictions
+description: Fix the expanded-lexicographic keyset predicate, the sort-spec fingerprint algorithm, and the NOT NULL/unique-tiebreaker v1 restrictions for the hasql pagination engine.
+timestamp: 2026-07-16T00:00:00Z
+docId: ADR-3
+status: Accepted
+date: 2026-07-16
+generated:
+  by: human:nadeem
+  at: 2026-07-16T00:00:00Z
+---
 
-Status: Accepted
-
-Date: 2026-07-16
+# Hasql keyset engine — predicate form, fingerprint, and v1 restrictions
 
 ## Context
 

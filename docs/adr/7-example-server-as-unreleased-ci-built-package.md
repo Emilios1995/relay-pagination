@@ -1,8 +1,17 @@
-# ADR 7: The example server is an unreleased, CI-built package and the guides' single source of truth
+---
+type: Architecture Decision Record
+title: The example server is an unreleased, CI-built package and the guides' single source of truth
+description: Make examples/members-server a fifth, unreleased, CI-built package whose source is machine-checked as the single source of truth for every guide code snippet.
+timestamp: 2026-07-16T00:00:00Z
+docId: ADR-7
+status: Accepted
+date: 2026-07-16
+generated:
+  by: human:nadeem
+  at: 2026-07-16T00:00:00Z
+---
 
-Status: Accepted
-
-Date: 2026-07-16
+# The example server is an unreleased, CI-built package and the guides' single source of truth
 
 ## Context
 

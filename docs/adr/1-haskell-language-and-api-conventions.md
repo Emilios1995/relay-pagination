@@ -1,8 +1,17 @@
-# ADR 1: Haskell language and API conventions
+---
+type: Architecture Decision Record
+title: Haskell language and API conventions
+description: Pin the GHC2024/GHC 9.12 baseline, Cabal common-stanza extensions, Servant NamedRoutes/MultiVerb conventions, and same-proxy OpenAPI generation for every package.
+timestamp: 2026-07-15T00:00:00Z
+docId: ADR-1
+status: Accepted
+date: 2026-07-15
+generated:
+  by: human:nadeem
+  at: 2026-07-15T00:00:00Z
+---
 
-Status: Accepted
-
-Date: 2026-07-15
+# Haskell language and API conventions
 
 ## Context
 

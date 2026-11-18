@@ -1,8 +1,17 @@
-# ADR 4: Servant pagination surface — RelayPage, the 400 envelope, and OpenAPI policy
+---
+type: Architecture Decision Record
+title: Servant pagination surface — RelayPage, the 400 envelope, and OpenAPI policy
+description: Define the type-level RelayPage combinator, its public 400 RelayPageError envelope, the servant/hasql validation split, and the canonical OpenAPI orphan-instance module.
+timestamp: 2026-07-16T00:00:00Z
+docId: ADR-4
+status: Accepted
+date: 2026-07-16
+generated:
+  by: human:nadeem
+  at: 2026-07-16T00:00:00Z
+---
 
-Status: Accepted
-
-Date: 2026-07-16
+# Servant pagination surface — RelayPage, the 400 envelope, and OpenAPI policy
 
 ## Context
 

@@ -1,8 +1,17 @@
-# ADR 6: Release packaging — per-package changelogs, version bounds, and release order
+---
+type: Architecture Decision Record
+title: Release packaging — per-package changelogs, version bounds, and release order
+description: Require per-package CHANGELOG.md files, version bounds on every build-depends entry, and a fixed release order across the four published packages.
+timestamp: 2026-07-24T00:00:00Z
+docId: ADR-6
+status: Accepted (amended 2026-07-24)
+date: 2026-07-16
+generated:
+  by: human:nadeem
+  at: 2026-07-24T00:00:00Z
+---
 
-Status: Accepted (amended 2026-07-24)
-
-Date: 2026-07-16
+# Release packaging — per-package changelogs, version bounds, and release order
 
 ## Context
 

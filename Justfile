@@ -25,6 +25,10 @@ openapi:
 haddock:
   cabal haddock all --haddock-hyperlink-source --haddock-quickjump
 
+# Validate the docs/adr OKF bundle against its profile (strict + log checks)
+check-adr:
+  okf validate docs/adr --profile docs/adr/profile.dhall --profile-enforce --log-enforce
+
 # Create the dev database if missing (used by process-compose's create_schema)
 create-database:
   @createdb "$PGDATABASE" 2>/dev/null || echo "database $PGDATABASE already exists"

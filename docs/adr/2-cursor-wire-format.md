@@ -1,8 +1,17 @@
-# ADR 2: Cursor wire format v1
+---
+type: Architecture Decision Record
+title: Cursor wire format v1
+description: Pin the opaque pagination cursor as unpadded base64url over compact, tagged, integer-exact JSON so cursors decode stably across releases.
+timestamp: 2026-07-16T00:00:00Z
+docId: ADR-2
+status: Accepted
+date: 2026-07-16
+generated:
+  by: human:nadeem
+  at: 2026-07-16T00:00:00Z
+---
 
-Status: Accepted
-
-Date: 2026-07-16
+# Cursor wire format v1
 
 ## Context
 

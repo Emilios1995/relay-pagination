@@ -1,8 +1,17 @@
-# ADR 5: Conformance suite — package boundary, walker contract, and invariants
+---
+type: Architecture Decision Record
+title: Conformance suite — package boundary, walker contract, and invariants
+description: Fix the conformance package's core-only dependency boundary, its plain-IO FetchPage walker contract, and the six invariants checkConformance enforces against any paginated endpoint.
+timestamp: 2026-07-16T00:00:00Z
+docId: ADR-5
+status: Accepted
+date: 2026-07-16
+generated:
+  by: human:nadeem
+  at: 2026-07-16T00:00:00Z
+---
 
-Status: Accepted
-
-Date: 2026-07-16
+# Conformance suite — package boundary, walker contract, and invariants
 
 ## Context
 

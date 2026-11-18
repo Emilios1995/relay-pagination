@@ -63,6 +63,14 @@ in  Schema.Project::{ project =
       , "shinzui/servant-openapi-hs"
       , "shinzui/ephemeral-pg"
       ]
+    , okfBundles =
+      [ Schema.OkfBundle::{ name = "adrs"
+        , path = "docs/adr"
+        , profile = Some "docs/adr/profile.dhall"
+        , okfVersion = "0.2"
+        , description = Some "Durable architecture decisions"
+        }
+      ]
     , docs =
       [ Schema.DocRef::{ key = "readme"
         , kind = Schema.DocKind.Guide
