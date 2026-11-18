@@ -70,6 +70,13 @@ in  Schema.Project::{ project =
         , okfVersion = "0.2"
         , description = Some "Durable architecture decisions"
         }
+      , Schema.OkfBundle::{ name = "improvement-requests"
+        , path = "docs/improvement-requests"
+        , profile = Some "docs/improvement-requests/profile.dhall"
+        , okfVersion = "0.2"
+        , description = Some
+            "Cross-repository improvement requests against relay-pagination"
+        }
       ]
     , docs =
       [ Schema.DocRef::{ key = "readme"
