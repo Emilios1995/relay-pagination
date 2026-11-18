@@ -27,7 +27,7 @@ import Relay.Pagination
 import Relay.Pagination.Hasql.Connection (mintCursor)
 import Relay.Pagination.Hasql.KeyCodec (microsToUtcTime, textKey, timestamptzKey)
 import Relay.Pagination.Hasql.SortSpec (KeyColumn (..), SortDirection (..), SortSpec (..), sortSpecFingerprint)
-import Relay.Pagination.Hasql.Sql (paginateSnippet)
+import Relay.Pagination.Hasql.Sql (paginateSnippet, totalCountSnippet)
 import Test.Tasty
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit
@@ -46,6 +46,8 @@ tests =
         (PageRequest {pageSize = 5, direction = Forward, cursor = Just propertyCursor})
         propertyBase,
       golden "members-forward-cursor-parameterized-base" (page Forward (Just membersCursor)) parameterizedBase,
+      countGolden "members-count" membersBase,
+      countGolden "members-count-parameterized-base" parameterizedBase,
       errorPathTests
     ]
   where
@@ -53,6 +55,8 @@ tests =
     goldenWith spec name req base =
       goldenVsString name ("test/golden/" <> name <> ".sql") do
         either (assertFailure . show) (pure . renderSql) (paginateSnippet spec req base)
+    countGolden name =
+      goldenVsString name ("test/golden/" <> name <> ".sql") . pure . renderSql . totalCountSnippet
     renderSql = LBS.fromStrict . Text.encodeUtf8 . Snippet.toSql
     page dir mc = PageRequest {pageSize = 5, direction = dir, cursor = mc}
 

@@ -11,6 +11,7 @@
 -- byte-stable.
 module Relay.Pagination.Hasql.Sql
   ( paginateSnippet,
+    totalCountSnippet,
   )
 where
 
@@ -33,6 +34,11 @@ import Relay.Pagination
   )
 import Relay.Pagination.Hasql.KeyCodec (KeyCodec (..))
 import Relay.Pagination.Hasql.SortSpec (KeyColumn (..), SortDirection (..), SortSpec (..), sortSpecFingerprint)
+
+-- | Count the rows of the filtered base query, preserving its parameters.
+totalCountSnippet :: Snippet -> Snippet
+totalCountSnippet base =
+  Snippet.sql "SELECT count(*) FROM (" <> base <> Snippet.sql ") AS rp_base"
 
 -- | Wrap a base query with the keyset predicate, order clause, and
 -- @LIMIT pageSize+1@ for the given page request.

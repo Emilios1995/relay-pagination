@@ -5,6 +5,7 @@
 -- final page that is exactly full), walked forward and backward.
 module Test.Integration (tests, demo) where
 
+import Control.Exception (bracket, finally, onException)
 import Control.Monad (forM_)
 import Data.Int (Int64)
 import Data.List (sortBy)
@@ -22,6 +23,7 @@ import Hasql.DynamicStatements.Snippet qualified as Snippet
 import Hasql.Encoders qualified as Encoders
 import Hasql.Session qualified as Session
 import Hasql.Statement (Statement)
+import Numeric.Natural (Natural)
 import Relay.Pagination
   ( Connection (..),
     CursorPayload (..),
@@ -33,11 +35,13 @@ import Relay.Pagination
     decodeCursor,
   )
 import Relay.Pagination.Hasql
-  ( KeyColumn (..),
+  ( CountedPage (..),
+    KeyColumn (..),
     SortDirection (..),
     SortSpec (..),
     mintCursor,
     paginate,
+    paginateCounted,
     sortSpecFingerprint,
     textKey,
     timestamptzKey,
@@ -94,9 +98,72 @@ tests = withResource acquire release \getDb ->
           (t, i) <- case keys payload of
             [KvTimestampMicros us, KvText i] -> pure (microsToUtcTime us, i)
             other -> fail ("unexpected cursor keys: " <> show other)
-          n <- run conn (Session.statement () (countStatement t i))
-          n @?= 1
+          n <- run conn (Session.statement () (exactKeyCountStatement t i))
+          n @?= 1,
+      totalCountTests getDb
     ]
+
+totalCountTests :: IO (Pg.Database, Connection.Connection) -> TestTree
+totalCountTests getDb =
+  testGroup
+    "total count"
+    [ check "first page" itemsBase "" first 25 (take 5 canonical),
+      check "middle page" itemsBase "" (atCursor Forward (canonical !! 4)) 25 (take 5 (drop 5 canonical)),
+      check
+        "backward page"
+        itemsBase
+        ""
+        (atCursor Backward (canonical !! 10))
+        25
+        (take 5 (drop 5 canonical)),
+      check "zero page size" itemsBase "" (first {pageSize = 0}) 25 [],
+      check "past the end" itemsBase "" (atCursor Forward (last canonical)) 25 [],
+      check "empty collection" (itemsBase <> Snippet.sql " WHERE false") " WHERE false" first 0 [],
+      check "filtered base query" filteredBase boundaryFilter first 2 (filter (\(i, _) -> i == "i21" || i == "i22") canonical),
+      -- A separate database isolates the concurrent insert from all other cases.
+      withResource acquire release \getSnapshotDb ->
+        testCase "repeatable read uses one snapshot across a concurrent insert" do
+          (db, reader) <- getSnapshotDb
+          p <- build itemsBase (first {pageSize = 25})
+          let sqlCount = Session.statement () (countStatement p)
+              sqlPage = Session.statement () (pageStatement p)
+              rollback = run reader (Session.script "ROLLBACK")
+          bracket
+            (either (fail . show) pure =<< Connection.acquire (Pg.connectionSettings db))
+            Connection.release
+            \writer -> do
+              let readSnapshot = do
+                    n <- run reader (Session.script "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY" *> sqlCount)
+                    run writer (insertRow ("new", snd (head canonical)))
+                    page <- run reader (sqlPage <* Session.script "COMMIT")
+                    pure (n, page)
+                  checkSnapshot = do
+                    (n, page) <- readSnapshot `onException` rollback
+                    n @?= 25
+                    nodesOf page @?= canonical
+                    run reader sqlCount >>= (@?= 26)
+              checkSnapshot `finally` run writer (Session.script "DELETE FROM items WHERE item_id = 'new'")
+    ]
+  where
+    first = PageRequest {pageSize = 5, direction = Forward, cursor = Nothing}
+    atCursor dir row = PageRequest {pageSize = 5, direction = dir, cursor = Just (mintCursor spec row)}
+    boundaryFilter = " WHERE item_id IN ('i21', 'i22')"
+    filteredBase = itemsBase <> Snippet.sql boundaryFilter
+    build base req = either (fail . show) pure (paginateCounted spec req base rowDecoder)
+    referenceCount predicate =
+      Snippet.toStatement
+        (Snippet.sql ("SELECT count(*) FROM items" <> predicate))
+        (Decoders.singleRow (Decoders.column (Decoders.nonNullable Decoders.int8)))
+    check name base predicate req expectedCount expectedNodes = testCase name do
+      (_, conn) <- getDb
+      p <- build base req
+      actualCount <- run conn (Session.statement () (countStatement p))
+      actualCount @?= (expectedCount :: Natural)
+      directCount <- run conn (Session.statement () (referenceCount predicate))
+      toInteger actualCount @?= toInteger directCount
+      page <- run conn (Session.statement () (pageStatement p))
+      totalCount page @?= Nothing
+      nodesOf page @?= expectedNodes
 
 -- * Engine wiring
 
@@ -145,8 +212,8 @@ walk conn dir = go (10 :: Int) Nothing
 nodesOf :: Connection (Text, UTCTime) -> [(Text, UTCTime)]
 nodesOf page = [n | Edge {node = n} <- edges page]
 
-countStatement :: UTCTime -> Text -> Statement () Int64
-countStatement t i =
+exactKeyCountStatement :: UTCTime -> Text -> Statement () Int64
+exactKeyCountStatement t i =
   Snippet.toStatement
     ( Snippet.sql "SELECT count(*) FROM items WHERE updated_at = "
         <> Snippet.encoderAndParam (Encoders.nonNullable Encoders.timestamptz) t

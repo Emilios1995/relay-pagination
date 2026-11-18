@@ -7,6 +7,13 @@
 -- spec-correct 'Connection'. Cursor values always travel as typed SQL
 -- parameters; malformed cursors surface as 'CursorError' before any SQL
 -- runs.
+--
+-- Use 'paginateCounted' to also count every row that matches the base query,
+-- independently of cursor, direction, and page size. Counting can be slow
+-- on large collections, so it is opt-in. Run both statements in one
+-- @REPEATABLE READ@ or @SERIALIZABLE@ transaction to read the same snapshot.
+-- With separate statements or @READ COMMITTED@, a concurrent write can
+-- make the page and count reflect different snapshots.
 module Relay.Pagination.Hasql
   ( -- * Sort specifications
     SortDirection (..),
@@ -24,6 +31,9 @@ module Relay.Pagination.Hasql
 
     -- * Engine
     paginate,
+    paginateCounted,
+    CountedPage (..),
+    totalCountStatement,
     paginateSnippet,
     mkConnection,
     mintCursor,
@@ -34,6 +44,7 @@ import Hasql.Decoders qualified as Decoders
 import Hasql.DynamicStatements.Snippet (Snippet)
 import Hasql.DynamicStatements.Snippet qualified as Snippet
 import Hasql.Statement (Statement)
+import Numeric.Natural (Natural)
 import Relay.Pagination (Connection, CursorError, PageRequest)
 import Relay.Pagination.Hasql.Connection (mintCursor, mkConnection)
 import Relay.Pagination.Hasql.KeyCodec
@@ -50,7 +61,7 @@ import Relay.Pagination.Hasql.SortSpec
     SortSpec (..),
     sortSpecFingerprint,
   )
-import Relay.Pagination.Hasql.Sql (paginateSnippet)
+import Relay.Pagination.Hasql.Sql (paginateSnippet, totalCountSnippet)
 
 -- | The whole engine in one function: validate the request's cursor against
 -- the sort specification, generate the keyset query, and post-process the
@@ -72,3 +83,28 @@ paginate ::
 paginate spec req base rowDecoder = do
   snippet <- paginateSnippet spec req base
   Right (mkConnection spec req <$> Snippet.toStatement snippet (Decoders.rowList rowDecoder))
+
+-- | The page statement and the count statement for its filtered collection.
+-- Attach their results with 'Relay.Pagination.countedConnection'.
+data CountedPage row = CountedPage
+  { pageStatement :: !(Statement () (Connection row)),
+    countStatement :: !(Statement () Natural)
+  }
+
+-- | Build an unprepared statement that counts the rows of the base query.
+totalCountStatement :: Snippet -> Statement () Natural
+totalCountStatement base =
+  Snippet.toStatement (totalCountSnippet base) $
+    fromIntegral <$> Decoders.singleRow (Decoders.column (Decoders.nonNullable Decoders.int8))
+
+-- | Validate and build the page statement as in 'paginate', and derive a
+-- count statement from the same base query.
+paginateCounted ::
+  SortSpec row ->
+  PageRequest ->
+  Snippet ->
+  Decoders.Row row ->
+  Either CursorError (CountedPage row)
+paginateCounted spec req base rowDecoder = do
+  page <- paginate spec req base rowDecoder
+  pure CountedPage {pageStatement = page, countStatement = totalCountStatement base}

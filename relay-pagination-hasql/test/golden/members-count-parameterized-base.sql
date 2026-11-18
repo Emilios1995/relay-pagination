@@ -1,0 +1,1 @@
+SELECT count(*) FROM (SELECT member_id, updated_at FROM members WHERE mls = $1) AS rp_base

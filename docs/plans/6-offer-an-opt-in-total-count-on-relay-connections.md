@@ -46,7 +46,7 @@ The response is a connection with two edges and a trailing `"totalCount":N`, whe
 ## Progress
 
 - [x] (2026-11-18) M1 Core: `Connection` carries an optional count and `CountedConnection` guarantees one; the byte-exact JSON and decode tests pass, including absent and null counts. The baseline and M1 each passed all five suites, and both existing OpenAPI artifacts were byte-identical (AC-1).
-- [ ] M2 hasql: `paginateCounted` and `totalCountStatement` derive the count from the base query; SQL goldens, the five-case integration test and the single-transaction test pass (AC-2, AC-3).
+- [x] (2026-11-18) M2 hasql: `paginateCounted` and `totalCountStatement` derive the count from the base query. All 43 hasql tests passed. Both count SQL goldens match the planned statements, and the six existing goldens are byte-identical. The transaction test observed 25 rows inside the snapshot and a count of 26 outside (AC-2, AC-3).
 - [ ] M3 servant: `CountedConnection` has an OpenAPI schema with a required `totalCount`; the new counted toy golden passes and `toy-openapi.json` is byte-identical (AC-4).
 - [ ] M4 Conformance: `checkTotalCount` passes for a correct counted endpoint and fails for the three broken count fixtures; the existing broken paginators still fail (AC-5).
 - [ ] M5 Example, guides, ADR-8 and release preparation: the example serves `/members/counted`, the guides show it, ADR-8 lifts the v1 exclusion, all packages are at 0.2.0.0, and `cabal test all`, `just check-adr` and `cabal check` are clean (AC-6).
@@ -54,7 +54,7 @@ The response is a connection with two edges and a trailing `"totalCount":N`, whe
 
 ## Surprises & Discoveries
 
-(None yet.)
+- The concurrent-insert test uses its own database fixture so the reader and writer can overlap without affecting the existing integration cases. It reads all 25 fixture rows with one page statement inside the snapshot, then confirms the count of 26 after committing.
 
 
 ## Decision Log
