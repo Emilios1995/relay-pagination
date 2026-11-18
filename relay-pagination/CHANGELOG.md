@@ -2,6 +2,16 @@
 
 Versioning follows the [Haskell Package Versioning Policy](https://pvp.haskell.org/).
 
+## 0.2.0.0 — 2026-11-18
+
+### Added
+
+- `CountedConnection` guarantees a non-negative count in JSON. Use `countedConnection` to attach it.
+
+### Breaking changes
+
+- `Connection` has a strict `totalCount :: Maybe Natural` field. Set `totalCount = Nothing` when constructing an uncounted connection. The uncounted JSON bytes are unchanged.
+
 ## 0.1.1.2 — 2026-10-06
 
 ### Fixed

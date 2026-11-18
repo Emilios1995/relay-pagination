@@ -10,6 +10,9 @@ module Example.Members.Api
   ( MemberPageResponses,
     MemberPageResult (..),
     ListMembersEndpoint,
+    CountedMemberPageResponses,
+    CountedMemberPageResult (..),
+    ListMembersCountedEndpoint,
     MemberRoutes (..),
     AppRoutes (..),
     appApi,
@@ -21,7 +24,7 @@ import Data.Proxy (Proxy (..))
 import Data.SOP (I (..), NS (..))
 import Example.Members.Domain (Member)
 import GHC.Generics (Generic)
-import Relay.Pagination (Connection)
+import Relay.Pagination (Connection, CountedConnection)
 import Relay.Pagination.Servant (RelayPage, RelayPageError)
 import Servant.API (JSON, NamedRoutes, StdMethod (GET), (:-), (:>))
 import Servant.API.MultiVerb (AsUnion (..), MultiVerb, MultiVerb1, Respond)
@@ -59,9 +62,37 @@ type ListMembersEndpoint =
     :> RelayPage 3 50
     :> MultiVerb 'GET '[JSON] MemberPageResponses MemberPageResult
 
+type CountedMemberPageResponses =
+  '[ Respond 200 "Counted page of members" (CountedConnection Member),
+     Respond 400 "Invalid pagination" RelayPageError
+   ]
+
+data CountedMemberPageResult
+  = CountedMemberPageOk !(CountedConnection Member)
+  | CountedMemberPageBadRequest !RelayPageError
+  deriving stock (Eq, Show)
+
+instance AsUnion CountedMemberPageResponses CountedMemberPageResult where
+  toUnion = \case
+    CountedMemberPageOk page -> Z (I page)
+    CountedMemberPageBadRequest err -> S (Z (I err))
+  fromUnion = \case
+    Z (I page) -> CountedMemberPageOk page
+    S (Z (I err)) -> CountedMemberPageBadRequest err
+    S (S impossible) -> case impossible of {}
+
+-- | @GET /members/counted@ uses the same pagination arguments and includes
+-- the total number of members matched by the query.
+type ListMembersCountedEndpoint =
+  "members"
+    :> "counted"
+    :> RelayPage 3 50
+    :> MultiVerb 'GET '[JSON] CountedMemberPageResponses CountedMemberPageResult
+
 -- | The members domain's routes.
 data MemberRoutes mode = MemberRoutes
-  { listMembers :: mode :- ListMembersEndpoint
+  { listMembers :: mode :- ListMembersEndpoint,
+    listMembersCounted :: mode :- ListMembersCountedEndpoint
   }
   deriving stock (Generic)
 

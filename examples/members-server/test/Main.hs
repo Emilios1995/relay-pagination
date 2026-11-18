@@ -10,15 +10,20 @@
 -- the @-threaded@ RTS warp needs makes tasty run tests concurrently).
 module Main (main) where
 
+import Control.Exception (bracketOnError, try)
+import Data.Aeson (Object, eitherDecode)
+import Data.Aeson.KeyMap qualified as KeyMap
 import Data.List (sortBy)
 import Data.Text qualified as Text
 import EphemeralPg qualified as Pg
-import Example.Members.Api (AppRoutes (..), MemberPageResult (..), MemberRoutes (..))
+import Example.Db (Db, closeDb, openDb, runDb, runRepeatableRead)
+import Example.Members.Api (AppRoutes (..), CountedMemberPageResult (..), MemberPageResult (..), MemberRoutes (..))
 import Example.Members.Domain (Member (..), canonicalOrder)
 import Example.Members.Handler (membersApp)
 import Example.Members.Seed (createMembersSchema, insertMembers, seedMembers)
-import Hasql.Connection qualified as HasqlConn
+import Hasql.Session qualified as Session
 import Network.HTTP.Client qualified as HttpClient
+import Network.HTTP.Types (status200)
 import Network.Wai.Handler.Warp (testWithApplication)
 import Relay.Pagination
 import Relay.Pagination.Conformance
@@ -50,6 +55,25 @@ tests = withResource acquireExample releaseExample \getExample ->
         (_, conn) <- getExample
         withClientEnv conn \env ->
           assertConformance (defaultConformanceConfig 4) (fetchPage env),
+      testCase "counted conformance walk through the typed client" do
+        (_, db) <- getExample
+        withClientEnv db \env ->
+          assertConformance ((defaultConformanceConfig 3) {checkTotalCount = True}) (fetchCountedPage env),
+      testCase "uncounted route omits totalCount from raw JSON" do
+        (_, db) <- getExample
+        testWithApplication (pure (membersApp db)) \port -> do
+          manager <- HttpClient.newManager HttpClient.defaultManagerSettings
+          request <- HttpClient.parseRequest ("http://127.0.0.1:" <> show port <> "/members?first=2")
+          response <- HttpClient.httpLbs request manager
+          HttpClient.responseStatus response @?= status200
+          body <- either assertFailure pure (eitherDecode @Object (HttpClient.responseBody response))
+          assertBool "totalCount is absent" (not (KeyMap.member "totalCount" body)),
+      testCase "failed counted transaction rolls back before the connection is reused" do
+        (_, db) <- getExample
+        failure <- try @IOError (runRepeatableRead db (Session.script "SELECT 1 / 0"))
+        case failure of
+          Left _ -> runDb db (Session.script "SELECT 1")
+          Right () -> assertFailure "expected a transaction error",
       testCase "first+last is a typed 400: mixed_pagination_directions" do
         (_, conn) <- getExample
         withClientEnv conn \env -> do
@@ -87,13 +111,21 @@ fetchPage env req =
   listPage env (toClientPage req) >>= \case
     MemberPageOk page -> pure page
     MemberPageBadRequest err -> fail ("server rejected pagination: " <> show err)
-  where
-    toClientPage PageRequest {pageSize = size, direction = dir, cursor = mCursor} =
-      case dir of
-        Forward -> forwardPage size mCursor
-        Backward -> backwardPage size mCursor
 
-withClientEnv :: HasqlConn.Connection -> (ClientEnv -> IO a) -> IO a
+fetchCountedPage :: ClientEnv -> FetchPage Member
+fetchCountedPage env req =
+  runClientM (listMembersCounted (members appClient) (toClientPage req)) env >>= \case
+    Right (CountedMemberPageOk page) -> pure (toConnection page)
+    Right (CountedMemberPageBadRequest err) -> fail ("server rejected pagination: " <> show err)
+    Left clientError -> fail ("transport failure: " <> show clientError)
+
+toClientPage :: PageRequest -> ClientPage
+toClientPage PageRequest {pageSize = size, direction = dir, cursor = mCursor} =
+  case dir of
+    Forward -> forwardPage size mCursor
+    Backward -> backwardPage size mCursor
+
+withClientEnv :: Db -> (ClientEnv -> IO a) -> IO a
 withClientEnv conn use =
   testWithApplication (pure (membersApp conn)) \port -> do
     manager <- HttpClient.newManager HttpClient.defaultManagerSettings
@@ -117,16 +149,15 @@ assertErrorCode expected = \case
 
 -- * Fixture
 
-acquireExample :: IO (Pg.Database, HasqlConn.Connection)
+acquireExample :: IO (Pg.Database, Db)
 acquireExample = do
   config <- ephemeralPgConfig
-  db <-
-    either (fail . Text.unpack . Pg.renderStartError) pure
-      =<< Pg.startCached config Pg.defaultCacheConfig
-  conn <- either (fail . show) pure =<< HasqlConn.acquire (Pg.connectionSettings db)
-  createMembersSchema conn
-  insertMembers conn seedMembers
-  pure (db, conn)
+  let start = either (fail . Text.unpack . Pg.renderStartError) pure =<< Pg.startCached config Pg.defaultCacheConfig
+  bracketOnError start Pg.stop \pg ->
+    bracketOnError (openDb (Pg.connectionSettings pg)) closeDb \db -> do
+      createMembersSchema db
+      insertMembers db seedMembers
+      pure (pg, db)
 
-releaseExample :: (Pg.Database, HasqlConn.Connection) -> IO ()
-releaseExample (db, conn) = HasqlConn.release conn *> Pg.stop db
+releaseExample :: (Pg.Database, Db) -> IO ()
+releaseExample (pg, db) = closeDb db *> Pg.stop pg

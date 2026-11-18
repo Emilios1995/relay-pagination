@@ -17,9 +17,8 @@ import Data.Time (UTCTime)
 import Data.UUID (UUID)
 import Data.UUID qualified as UUID
 import Data.Word (Word32)
-import Example.Db (runDb)
+import Example.Db (Db, runDb)
 import Example.Members.Domain (Member (..))
-import Hasql.Connection qualified as HasqlConn
 import Hasql.Decoders qualified as Decoders
 import Hasql.Encoders qualified as Encoders
 import Hasql.Session qualified as Session
@@ -31,7 +30,7 @@ import Relay.Pagination.Hasql.KeyCodec (microsToUtcTime)
 -- directions match 'Example.Members.Query.memberSort' exactly. PostgreSQL
 -- can scan the same index backward, so one index serves both @first@/@after@
 -- and @last@/@before@ pages.
-createMembersSchema :: HasqlConn.Connection -> IO ()
+createMembersSchema :: Db -> IO ()
 createMembersSchema conn =
   runDb conn $
     Session.script
@@ -83,7 +82,7 @@ seedMembers =
 
 -- | One multi-row insert via @unnest@; the values stay typed hasql
 -- parameters, never interpolated into the SQL text.
-insertMembers :: HasqlConn.Connection -> [Member] -> IO ()
+insertMembers :: Db -> [Member] -> IO ()
 insertMembers conn members =
   runDb conn $
     Session.statement

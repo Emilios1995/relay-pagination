@@ -4,6 +4,21 @@ All published packages in this repository share a single version and are
 released together. Per-package details live in each package's own
 `CHANGELOG.md`.
 
+## 0.2.0.0 — 2026-11-18
+
+### Added
+
+- Count the full filtered collection with `paginateCounted` or `totalCountStatement`.
+- Declare a required count on a Servant endpoint with `CountedConnection` and verify it with `checkTotalCount`.
+
+### Breaking changes
+
+- Set `totalCount = Nothing` when constructing an uncounted `Connection`.
+- Set `checkTotalCount = False` when constructing `ConformanceConfig` manually to keep the previous behavior.
+- Handle `TotalCountConsistency` in exhaustive matches on `InvariantName`.
+
+Uncounted JSON, SQL, and OpenAPI retain their previous shapes. The v1 cursors remain compatible.
+
 ## 0.1.1.2 — 2026-10-06
 
 ### Fixed

@@ -6,9 +6,9 @@ The library is four packages:
 
 | Package | You use it for |
 |---|---|
-| `relay-pagination` | The wire types (`Connection`, `Edge`, `PageInfo`, `PageRequest`) and the opaque cursor codec |
+| `relay-pagination` | The wire types (`Connection`, `CountedConnection`, `Edge`, `PageInfo`, `PageRequest`) and the opaque cursor codec |
 | `relay-pagination-servant` | The `RelayPage` route combinator: parses/validates `first`/`after`/`last`/`before` ahead of your handler |
-| `relay-pagination-hasql` | The keyset engine: turns your base query + sort specification into one paginated `Statement` |
+| `relay-pagination-hasql` | The keyset engine: turns your base query + sort specification into a page statement and an optional count statement |
 | `relay-pagination-conformance` | The test suite you run against your own endpoint before shipping |
 
 > **Project conventions used by this example.** The example follows this repository's Haskell conventions (`docs/adr/1-haskell-language-and-api-conventions.md`): GHC 9.12.4+ with `default-language: GHC2024` and a shared Cabal `common` stanza per component; postpositive qualified imports (`import Data.Text qualified as Text`); public records with strict, unprefixed fields and explicit deriving strategies; selectors or explicit record patterns instead of record-update syntax; and GHC 9.12 `MultilineStrings` for embedded multi-line SQL. If your service has stricter established equivalents, follow yours — the parts you must preserve are the route and response shapes below, not the style.
@@ -108,7 +108,8 @@ type ListMembersEndpoint =
     :> MultiVerb 'GET '[JSON] MemberPageResponses MemberPageResult
 
 data MemberRoutes mode = MemberRoutes
-  { listMembers :: mode :- ListMembersEndpoint
+  { listMembers :: mode :- ListMembersEndpoint,
+    listMembersCounted :: mode :- ListMembersCountedEndpoint
   }
   deriving stock (Generic)
 
@@ -175,7 +176,7 @@ memberRowDecoder =
 The handler composes them with `paginate` and runs the resulting statement in a hasql session (`examples/members-server/src/Example/Members/Handler.hs`):
 
 ```haskell
-listMembersHandler :: HasqlConn.Connection -> PageRequest -> Handler MemberPageResult
+listMembersHandler :: Db -> PageRequest -> Handler MemberPageResult
 listMembersHandler conn pageRequest =
   case paginate memberSort pageRequest baseQuery memberRowDecoder of
     -- The combinator already rejected malformed base64; a Left here means
@@ -200,6 +201,56 @@ LIMIT $4
 
 The expanded `(a < $1) OR (a = $1 AND b > $2)` form — rather than PostgreSQL's row-value `(a, b) < ($1, $2)` — is what makes mixed `Asc`/`Desc` specifications correct; row-value comparison can only express uniform directions. The `LIMIT` is `pageSize + 1`: the probe row is how `hasNextPage`/`hasPreviousPage` are derived (if the n+1th row came back, there is more), instead of the classic `length == pageSize` heuristic that emits a phantom empty page whenever the result size is an exact multiple of the page size. Paging backward flips the comparisons and the `ORDER BY`, then reverses the rows in memory, so **edges always come back in canonical order regardless of direction** (engine details: `docs/adr/3-hasql-keyset-engine.md`).
 
+## Adding a counted endpoint
+
+Opt in when consumers need the size of the whole filtered collection.
+`totalCount` follows the filters in the base query and is independent of
+cursor, direction, and page size, including when a page is empty. PostgreSQL
+must count every matching row, which can be expensive. Keep using
+`paginate` and `Connection` for endpoints that should omit the collection size.
+
+The example declares `CountedConnection Member` in the success response
+for `GET /members/counted`. Its JSON decoder requires a count and its OpenAPI
+schema declares a required integer with minimum zero.
+
+```haskell
+type CountedMemberPageResponses =
+  '[ Respond 200 "Counted page of members" (CountedConnection Member),
+     Respond 400 "Invalid pagination" RelayPageError
+   ]
+
+type ListMembersCountedEndpoint =
+  "members"
+    :> "counted"
+    :> RelayPage 3 50
+    :> MultiVerb 'GET '[JSON] CountedMemberPageResponses CountedMemberPageResult
+```
+
+Pass the same sort specification, request, base query and row decoder to
+`paginateCounted`. The example executes both returned statements and attaches
+the count with `countedConnection`.
+
+```haskell
+listMembersCountedHandler :: Db -> PageRequest -> Handler CountedMemberPageResult
+listMembersCountedHandler db pageRequest =
+  case paginateCounted memberSort pageRequest baseQuery memberRowDecoder of
+    Left cursorError ->
+      pure (CountedMemberPageBadRequest (cursorRejected pageRequest cursorError))
+    Right statements ->
+      fmap CountedMemberPageOk . liftIO . runRepeatableRead db $
+        countedConnection
+          <$> Session.statement () (countStatement statements)
+          <*> Session.statement () (pageStatement statements)
+```
+
+The example's `runRepeatableRead` runs the page and count in one
+`REPEATABLE READ` read-only transaction, so they describe the same database
+snapshot. Separate statements and statements in a `READ COMMITTED`
+transaction can see different snapshots. A concurrent insert or delete can
+therefore make the count differ from what a full walk returns. That can be
+acceptable for a display count. Logic that requires equality must read the
+data against one snapshot, including any additional pages it compares.
+
 ## Serving and checking the OpenAPI document
 
 The document is OpenAPI **3.1**, via `openapi-hs`/`servant-openapi-hs` (modules `Data.OpenApi` and `Servant.OpenApi` — not the abandoned `openapi3` package), and it is *derived*, never hand-authored, from the exact proxy that `serve` consumes (`examples/members-server/src/Example/OpenApi.hs`):
@@ -214,6 +265,7 @@ membersOpenApi =
       ?~ "Example Relay-style cursor-paginated members API from the relay-pagination package family."
     & OpenApi.servers .~ ["http://localhost:8080"]
     & operationIdAt "/members" "listMembers"
+    & operationIdAt "/members/counted" "listMembersCounted"
     & operationIdAt "/openapi.json" "getOpenApi"
 ```
 
@@ -246,11 +298,12 @@ fetchPage env req =
   listPage env (toClientPage req) >>= \case
     MemberPageOk page -> pure page
     MemberPageBadRequest err -> fail ("server rejected pagination: " <> show err)
-  where
-    toClientPage PageRequest {pageSize = size, direction = dir, cursor = mCursor} =
-      case dir of
-        Forward -> forwardPage size mCursor
-        Backward -> backwardPage size mCursor
+
+toClientPage :: PageRequest -> ClientPage
+toClientPage PageRequest {pageSize = size, direction = dir, cursor = mCursor} =
+  case dir of
+    Forward -> forwardPage size mCursor
+    Backward -> backwardPage size mCursor
 
 assertConformance :: ConformanceConfig -> FetchPage Member -> IO ()
 assertConformance config fetch = do
@@ -270,6 +323,13 @@ relay-pagination conformance: OK (8 page(s) walked)
 ```
 
 and any violation renders as a `FAIL <Invariant> (page N): <specifics>` block naming the offending keys.
+
+For a counted endpoint, set `checkTotalCount = True` on
+`defaultConformanceConfig` and adapt your typed response with `toConnection`.
+Keep the fixture stable throughout the walk. The checker reports
+`TotalCountConsistency` with the walk direction and page index whenever a
+count is missing or differs from the number of distinct keys collected
+during the forward walk.
 
 **Seed your test dataset with duplicate sort-key values on everything but the tie-breaker.** The example seeds ten members of which two share a `created_at`, positioned so the tie straddles a page boundary — that is precisely the case a missing or non-unique tie-breaker fails. If your test data is all-distinct, the suite cannot catch the most common bug.
 

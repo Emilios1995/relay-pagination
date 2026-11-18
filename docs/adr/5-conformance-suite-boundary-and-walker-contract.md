@@ -1,8 +1,8 @@
 ---
 type: Architecture Decision Record
 title: Conformance suite — package boundary, walker contract, and invariants
-description: Fix the conformance package's core-only dependency boundary, its plain-IO FetchPage walker contract, and the six invariants checkConformance enforces against any paginated endpoint.
-timestamp: 2026-07-16T00:00:00Z
+description: Define the conformance package's core-only boundary, plain-IO FetchPage contract, and seven invariants including opt-in total count consistency.
+timestamp: 2026-11-18T16:02:00Z
 docId: ADR-5
 status: Accepted
 date: 2026-07-16
@@ -47,7 +47,7 @@ one. Cycles and non-cycling divergence both exist in the wild and neither
 check subsumes the other. `walkEdges` is always canonical-order: backward
 walks concatenate pages in reverse visit order.
 
-**Six invariants, checked by `checkConformance`** (module haddock in
+**Seven invariants, checked by `checkConformance`** (module haddock in
 `Relay.Pagination.Conformance.Check` carries the full rationale):
 completeness (same elements, multiplicity, order as expected), backward
 symmetry (compared by node keys, not cursor bytes — Relay does not require
@@ -58,11 +58,17 @@ mutates), edge-order invariance (every page is a contiguous slice of the
 expected order), and PageInfo cursor consistency (start/end cursors match the
 edges). Aborted walks report as `WalkTerminated`.
 
+The seventh invariant, `TotalCountConsistency`, is enabled by
+`checkTotalCount` for counted endpoints over a stable dataset. Every page
+in each enabled walk must carry the number of distinct node keys collected
+by the forward walk. See [ADR-8](8-opt-in-total-count.md).
+
 **The suite must be able to fail.** The repository keeps three deliberately
 broken paginators (boundary heuristic, lossy float cursor, reversed backward
 pages) and an OFFSET/LIMIT paginator that fails the insert-behind mutation
 schedule the keyset engine survives. Any change to the checker must keep
-these red.
+these red. Counted checks also have fixtures that report a constant wrong
+count, report the rows remaining from the cursor, or omit the count.
 
 ## Consequences and operational notes
 

@@ -2,6 +2,17 @@
 
 Versioning follows the [Haskell Package Versioning Policy](https://pvp.haskell.org/).
 
+## 0.2.0.0 — 2026-11-18
+
+### Added
+
+- Enable `checkTotalCount` to compare every walked page's count against the number of distinct keys in the forward walk over a stable dataset.
+
+### Breaking changes
+
+- `ConformanceConfig` has a strict `checkTotalCount` field. Use `False` for the previous behavior, which remains the default.
+- Handle `TotalCountConsistency` in exhaustive matches on `InvariantName`.
+
 ## 0.1.1.2 — 2026-10-06
 
 ### Fixed

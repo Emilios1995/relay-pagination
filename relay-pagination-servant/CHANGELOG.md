@@ -2,6 +2,16 @@
 
 Versioning follows the [Haskell Package Versioning Policy](https://pvp.haskell.org/).
 
+## 0.2.0.0 — 2026-11-18
+
+### Added
+
+- Declare `CountedConnection` as the success response to require an integer `totalCount` with minimum zero in OpenAPI. The uncounted schema remains byte-identical.
+
+### Other changes
+
+- Align the core dependency with 0.2.0.0. Code that constructs `Connection` directly needs `totalCount = Nothing` to keep the uncounted response.
+
 ## 0.1.1.2 — 2026-10-06
 
 ### Fixed

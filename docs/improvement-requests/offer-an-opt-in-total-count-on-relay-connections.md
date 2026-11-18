@@ -6,7 +6,9 @@ generated:
   by: claude-code/claude-opus-5-5
   at: "2026-11-18T14:58:31Z"
 requestId: IR-1
-status: proposed
+status: completed
+completedAt: "2026-11-18T16:04:24Z"
+resolution: "ExecPlan 6 verified AC-1 through AC-6 in all five Cabal test suites, strict ADR validation, and a live smoke test of the counted members route."
 origin: mori://tan/agent-reputation-service
 acceptanceCriteria:
   - id: AC-1

@@ -29,6 +29,10 @@ haddock:
 check-adr:
   okf validate docs/adr --profile docs/adr/profile.dhall --profile-enforce --log-enforce
 
+# Validate recorded execution friction against its profile
+check-friction:
+  okf validate docs/friction-log --strict --profile docs/friction-log/profile.dhall --profile-enforce --log-enforce
+
 # Create the dev database if missing (used by process-compose's create_schema)
 create-database:
   @createdb "$PGDATABASE" 2>/dev/null || echo "database $PGDATABASE already exists"

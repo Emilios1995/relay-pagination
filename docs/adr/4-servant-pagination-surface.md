@@ -2,7 +2,7 @@
 type: Architecture Decision Record
 title: Servant pagination surface — RelayPage, the 400 envelope, and OpenAPI policy
 description: Define the type-level RelayPage combinator, its public 400 RelayPageError envelope, the servant/hasql validation split, and the canonical OpenAPI orphan-instance module.
-timestamp: 2026-07-16T00:00:00Z
+timestamp: 2026-11-18T16:02:00Z
 docId: ADR-4
 status: Accepted
 date: 2026-07-16
@@ -57,7 +57,8 @@ rejected by the engine before any SQL runs. This keeps the servant and hasql
 packages fully independent — their only shared vocabulary is the core types.
 
 **`Relay.Pagination.Servant.OpenApi` is the sole permitted home of the OpenAPI
-orphan instances** for `Cursor`, `PageInfo`, `Edge a`, `Connection a` (and it
+orphan instances** for `Cursor`, `PageInfo`, `Edge a`, `Connection a`,
+`CountedConnection a` (and it
 also hosts non-orphan `RelayPageError` schemas). Core must not depend on
 `openapi-hs`; `openapi-hs` cannot know this library; orphans are the standard
 escape hatch, and the duplicate-instance danger is neutralized by declaring
@@ -66,6 +67,13 @@ downstream may define these instances. The module compiles under a
 module-local `-Wno-orphans`; accidental orphans elsewhere still warn. Generic
 schema names for applied types come from `Type.Reflection` (`Connection_Item`,
 `Edge_Item`).
+
+**The declared success body opts in to counts.** The derived
+`Connection a` schema drops the optional `totalCount` property so existing
+uncounted endpoints keep their schema. `CountedConnection a` derives from the
+same schema with a distinct `CountedConnection_…` component name. It requires
+`totalCount` as an integer with minimum zero. The counted toy API has its own
+generated golden and shares the original uncounted route. See [ADR-8](8-opt-in-total-count.md).
 
 **OpenAPI documents are deterministic build artifacts derived from the served
 proxy.** `toOpenApi` is always applied to the exact `Proxy` passed to `serve`;

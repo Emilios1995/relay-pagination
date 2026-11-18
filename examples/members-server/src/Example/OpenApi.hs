@@ -47,6 +47,7 @@ membersOpenApi =
       ?~ "Example Relay-style cursor-paginated members API from the relay-pagination package family."
     & OpenApi.servers .~ ["http://localhost:8080"]
     & operationIdAt "/members" "listMembers"
+    & operationIdAt "/members/counted" "listMembersCounted"
     & operationIdAt "/openapi.json" "getOpenApi"
 
 -- | Set the GET operation id on one path.

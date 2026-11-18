@@ -8,7 +8,7 @@ Declare a `RelayPage` combinator on a route, write your base SQL query (filters 
 
 It exists because hand-rolled cursor pagination breaks infinite scrolling *silently*: timestamps round-tripped through floats skip every row sharing a boundary microsecond, `length == pageSize` heuristics report phantom next pages, backward pages come back reversed, and non-unique sort keys lose rows at page boundaries. This library makes those bugs unrepresentable where it can (cursors carry timestamps as exact integer microseconds; there is deliberately no float key type) and falsifiable where it can't — a conformance suite walks your real endpoint and proves no row is ever skipped or duplicated.
 
-> **Status:** pre-release (0.1.0.0, not yet on Hackage). See [Release status](#release-status).
+> This branch targets 0.2.0.0. See [Release status](#release-status).
 
 ## 60-second quickstart
 
@@ -23,7 +23,7 @@ import Relay.Pagination.Hasql
 import Relay.Pagination.Servant
 import Servant.API.MultiVerb
 
--- One route, in a domain-owned NamedRoutes record: four Relay query
+-- The uncounted route, in a domain-owned NamedRoutes record: four Relay query
 -- parameters (default page size 3, max 50), typed 200 and 400 responses.
 type ListMembersEndpoint =
   "members"
@@ -31,7 +31,8 @@ type ListMembersEndpoint =
     :> MultiVerb 'GET '[JSON] MemberPageResponses MemberPageResult
 
 data MemberRoutes mode = MemberRoutes
-  { listMembers :: mode :- ListMembersEndpoint
+  { listMembers :: mode :- ListMembersEndpoint,
+    listMembersCounted :: mode :- ListMembersCountedEndpoint
   }
   deriving stock (Generic)
 
@@ -73,7 +74,7 @@ baseQuery =
 
 -- The handler receives an already-validated PageRequest; invalid requests
 -- were answered 400 (JSON RelayPageError) before it ran.
-listMembersHandler :: HasqlConn.Connection -> PageRequest -> Handler MemberPageResult
+listMembersHandler :: Db -> PageRequest -> Handler MemberPageResult
 listMembersHandler conn pageRequest =
   case paginate memberSort pageRequest baseQuery memberRowDecoder of
     -- The combinator already rejected malformed base64; a Left here means
@@ -85,14 +86,19 @@ listMembersHandler conn pageRequest =
       liftIO (MemberPageOk <$> runDb conn (Session.statement () statement))
 ```
 
+Request `GET /members/counted?first=2` to include the size of the whole
+filtered collection as `totalCount`. A counted handler uses `paginateCounted`
+and returns `CountedConnection Member`, which makes the count required in
+OpenAPI. See the [counted endpoint guide](docs/guides/implementing-pagination.md#adding-a-counted-endpoint).
+
 ## Packages
 
 | Package | What it is |
 |---|---|
-| [`relay-pagination`](relay-pagination/) | Wire types (`Connection`, `Edge`, `PageInfo`, `PageRequest`) and the versioned, fingerprinted opaque cursor codec. Dependency-light core. |
-| [`relay-pagination-servant`](relay-pagination-servant/) | The `RelayPage` combinator with `HasServer`/`HasClient`/`HasLink` instances and OpenAPI 3.1 documentation support. |
-| [`relay-pagination-hasql`](relay-pagination-hasql/) | The keyset engine: sort specifications with typed codecs, expanded-lexicographic keyset SQL generation, connection assembly. |
-| [`relay-pagination-conformance`](relay-pagination-conformance/) | The walker services run against their own endpoints to prove no-skip/no-duplicate pagination (six invariants, forward + backward). |
+| [`relay-pagination`](relay-pagination/) | Wire types (`Connection`, `CountedConnection`, `Edge`, `PageInfo`, `PageRequest`) and the versioned, fingerprinted opaque cursor codec. Dependency-light core. |
+| [`relay-pagination-servant`](relay-pagination-servant/) | The `RelayPage` combinator with `HasServer`/`HasClient`/`HasLink` instances and OpenAPI 3.1 schemas for counted and uncounted connections. |
+| [`relay-pagination-hasql`](relay-pagination-hasql/) | The keyset engine: sort specifications with typed codecs, keyset SQL generation, connection assembly, and opt-in count statements. |
+| [`relay-pagination-conformance`](relay-pagination-conformance/) | The walker services run against their own endpoints to prove no-skip/no-duplicate pagination and check total counts when enabled. |
 
 `examples/members-server` is a fifth, never-released package: the runnable example the guides quote, CI-compiled so documentation cannot rot.
 

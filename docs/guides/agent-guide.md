@@ -28,7 +28,11 @@ It is self-contained: every template is inlined, and it references nothing in th
 
 **Step 4 (engine) — division of labor.** The `RelayPage` combinator validates request *syntax* (integers, base64url well-formedness, argument families, size bounds) before the handler runs; `paginate` validates cursor *semantics* (fingerprint, key count, key types) against the endpoint's sort specification before any SQL runs. A handler therefore sees only two outcomes: a decodable request that belongs to this endpoint (run the statement) or a `CursorError` (map to the same 400 envelope, `code = "invalid_cursor"`). Nothing user-controlled ever reaches SQL as text — cursor keys and the LIMIT travel as typed parameters; the only verbatim splices are the developer-authored `columnExpr` strings.
 
+**Counted endpoints.** Declare `CountedConnection` in the 200 response to make `totalCount` required in OpenAPI. Use `paginateCounted` with the same filtered base query and combine the returned statements with `countedConnection`. Run both statements in one read-only `REPEATABLE READ` transaction when they must agree under concurrent writes. Use `Connection` and `paginate` for endpoints that omit the count. See the [compiled example wiring](implementing-pagination.md#adding-a-counted-endpoint).
+
 **Step 5 (conformance) — why it is mandatory.** The bug classes this library targets (boundary skips, phantom pages, direction asymmetry) all type-check. The suite is the only step that observes actual paging behavior: it walks the endpoint forward and backward and checks six invariants — completeness, backward symmetry, boundary honesty, cursor determinism, edge-order invariance, and pageInfo–cursor consistency. Treat a red conformance run on engine-internal invariants as a bug to report against `relay-pagination-hasql`, not something to absorb in service code.
+
+For a counted endpoint, use `toConnection` in the fetch callback and enable `checkTotalCount` on a stable fixture. Each walked page must report the number of distinct keys collected in the forward walk.
 
 **Step 6 (OpenAPI) — why generator-only writes.** The moment a checked-in document can be edited by hand (or "accepted" by a test flag), the document and the served API begin to drift and the diff check stops meaning anything. The generator derives from the same proxy that serves; regeneration being a no-op is the proof the artifact is current.
 
@@ -48,4 +52,4 @@ It is self-contained: every template is inlined, and it references nothing in th
 
 - Runnable example (the templates' source of truth): `examples/members-server/` in this repository; boot it with `just example`.
 - Full narrative and anti-pattern catalogue: [implementing-pagination.md](implementing-pagination.md).
-- Durable design decisions: `docs/adr/2-cursor-wire-format.md` (cursor format), `docs/adr/3-hasql-keyset-engine.md` (predicate form, fingerprint), `docs/adr/4-servant-pagination-surface.md` (400 contract, OpenAPI policy), `docs/adr/5-conformance-suite-boundary-and-walker-contract.md` (walker contract, invariants).
+- Design records cover the cursor format, engine, HTTP contract, conformance, and counts. [ADR index](../adr/index.md), [ADR-8](../adr/8-opt-in-total-count.md).

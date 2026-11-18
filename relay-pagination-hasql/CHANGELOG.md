@@ -2,6 +2,16 @@
 
 Versioning follows the [Haskell Package Versioning Policy](https://pvp.haskell.org/).
 
+## 0.2.0.0 — 2026-11-18
+
+### Added
+
+- `paginateCounted` returns a page statement and a count statement from the same filtered base query. `totalCountStatement` provides the count alone. Use one `REPEATABLE READ` transaction when the two results must describe the same snapshot.
+
+### Other changes
+
+- Align the core dependency with 0.2.0.0. Code that constructs `Connection` directly needs `totalCount = Nothing` to keep the uncounted response.
+
 ## 0.1.1.2 — 2026-10-06
 
 ### Fixed

@@ -2,7 +2,7 @@
 type: Architecture Decision Record
 title: Hasql keyset engine — predicate form, fingerprint, and v1 restrictions
 description: Fix the expanded-lexicographic keyset predicate, the sort-spec fingerprint algorithm, and the NOT NULL/unique-tiebreaker v1 restrictions for the hasql pagination engine.
-timestamp: 2026-07-16T00:00:00Z
+timestamp: 2026-11-18T16:02:00Z
 docId: ADR-3
 status: Accepted
 date: 2026-07-16
@@ -68,6 +68,12 @@ not be prepared. The `Either` surfaces cursor validation (fingerprint, key
 arity, key types) before any SQL runs, so garbage cursors become HTTP 400s,
 never SQL runtime errors.
 
+**Counts use the same statement-level surface.** `paginateCounted` returns
+the page statement and an independent count statement from one base query.
+`totalCountStatement` exposes the count alone. Callers choose how to run
+both statements and how to compose the results. The count SQL and snapshot
+contract are recorded in [ADR-8](8-opt-in-total-count.md).
+
 **Cursors are minted in Haskell from the decoded row, never in SQL.**
 `mintCursor` extracts each key value from the very values the row decoder
 produced, and `timestamptzKey` converts `UTCTime` to exact integer
@@ -92,3 +98,7 @@ pure regression tests plus ephemeral-pg integration walks over adversarial
 data (ten-way timestamp ties, a microsecond-adjacent pair, an exactly-full
 final page). EP-4's conformance suite treats `paginate` as its system under
 test; EP-5's guides quote this API.
+
+The count SQL goldens pin the subquery wrapper for plain and parameterized
+base queries in `members-count.sql` and
+`members-count-parameterized-base.sql` under the same directory.

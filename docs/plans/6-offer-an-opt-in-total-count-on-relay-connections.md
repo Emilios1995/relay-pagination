@@ -49,12 +49,14 @@ The response is a connection with two edges and a trailing `"totalCount":N`, whe
 - [x] (2026-11-18) M2 hasql: `paginateCounted` and `totalCountStatement` derive the count from the base query. All 43 hasql tests passed. Both count SQL goldens match the planned statements, and the six existing goldens are byte-identical. The transaction test observed 25 rows inside the snapshot and a count of 26 outside (AC-2, AC-3).
 - [x] (2026-11-18) M3 servant: All 29 tests passed, including the counted schema, raw HTTP and typed client cases. The original `toy-openapi.json` is byte-identical (AC-4).
 - [x] (2026-11-18) M4 Conformance: All 36 tests passed. The counted oracle, database and typed HTTP walks pass. The three broken count fixtures report only `TotalCountConsistency` at the expected page indices, and the existing broken paginators still trigger their original failures (AC-5).
-- [ ] M5 Example, guides, ADR-8 and release preparation: the example serves `/members/counted`, the guides show it, ADR-8 lifts the v1 exclusion, all packages are at 0.2.0.0, and `cabal test all`, `just check-adr` and `cabal check` are clean (AC-6).
+- [x] (2026-11-18) M5 Example, guides, ADR-8 and release preparation: the counted example passed its typed-client walk and live HTTP checks. The guides quote the compiled example, ADR-8 records the extension, and all four packages are at 0.2.0.0. All 164 tests passed across five suites. All four `cabal check` runs reported zero errors or warnings, and the ADR, improvement request, and friction bundles passed strict validation (AC-6).
 
 
 ## Surprises & Discoveries
 
 - The concurrent-insert test uses its own database fixture so the reader and writer can overlap without affecting the existing integration cases. It reads all 25 fixture rows with one page statement inside the snapshot, then confirms the count of 26 after committing.
+- The example shares one hasql connection across requests. The driver releases its session lock before returning a SQL error, so the example holds its own lock until the failed transaction has rolled back. The example test deliberately fails a transaction and then reuses the connection.
+- Port 8080 was occupied during live validation. The same example booted on port 48193 through Cabal REPL for the curl checks. See [FRIC-1](../friction-log/1-example-smoke-test-port-already-occupied.md).
 
 
 ## Decision Log
@@ -82,7 +84,17 @@ The response is a connection with two edges and a trailing `"totalCount":N`, whe
 
 ## Outcomes & Retrospective
 
-(To be filled during and after implementation.)
+IR-1 is complete. The four published packages are prepared at 0.2.0.0.
+Counted connections expose the full filtered collection size even for a
+zero-size page. The live first, next, and zero-size pages each returned
+`totalCount: 10`. The uncounted response contained only `edges` and
+`pageInfo`. The original toy OpenAPI artifact and six page SQL goldens are
+byte-identical, and the example OpenAPI diff adds only `/members/counted`
+and `CountedConnection_Member`. The v1 cursor and fingerprint tests passed.
+
+FRIC-1 was accepted. The default example port is still 8080. The smoke
+check used port 48193 with the startup function described below.
+[Friction entry](../friction-log/1-example-smoke-test-port-already-occupied.md).
 
 
 ## Context and Orientation
@@ -164,7 +176,7 @@ SELECT count(*) FROM (SELECT member_id, updated_at FROM members WHERE mls = $1) 
 
 In `relay-pagination-hasql/test/Test/Integration.hs` add a test group named `total count`. Using `paginateCounted` over the existing 25-row fixture and page size 5, assert the count is 25 for a first page, for a middle page reached with an `after` cursor, and for a backward page reached with a `before` cursor; assert it is 25 for a page size of 0, where the page has no edges; assert it is 0 for a base query that matches nothing (for example the items base with `WHERE false`); and assert it is 2 for the filtered base query the existing boundary test uses (`item_id IN ('i21', 'i22')`), which shows the count follows the base query's filters. In each case also compare the count with a directly written `SELECT count(*)` over the same table and filter.
 
-Add the single-transaction test to the same group. Open a second connection to the same database with `Connection.acquire (Pg.connectionSettings db)`. On the first connection run `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY` with `Session.script`, run the count statement, then on the second connection insert one new row into `items` and let it commit, then run the page statement on the first connection and `COMMIT`. Walk the remaining pages inside the same transaction if that is simpler than reasoning about one page; the assertion is that the count is 25 and the newly inserted row is in no page read inside the transaction. Then, outside any transaction, run the count statement again and assert 26, which shows the same two statements run separately do observe the concurrent write. Delete the inserted row at the end so the other tests in the shared fixture are unaffected, and place this test so it cannot interleave with them (the group already shares one connection; make it a `sequentialTestGroup` if the suite is linked with `-threaded`).
+Add the single-transaction test to the same group with a dedicated database fixture. Open a second connection to that database with `Connection.acquire (Pg.connectionSettings db)`. On the first connection run `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY` with `Session.script`, then run the count statement. Insert one row on the second connection and let it commit. Run a page statement sized for all 25 fixture rows on the first connection, then `COMMIT`. Assert that the count is 25 and the page contains exactly the fixture rows. Outside the transaction, run the count statement again and assert 26. Delete the inserted row and release both connections at the end.
 
 Verify with `cabal test relay-pagination-hasql:relay-pagination-hasql-tests`.
 
@@ -295,6 +307,18 @@ curl -s 'http://localhost:8080/members/counted?first=0'
 
 The first response has the keys `edges` and `pageInfo` only. The second has the same two keys followed by `totalCount` with the number of seeded members. The third has an empty `edges` array and the same `totalCount`. Following `pageInfo.endCursor` with `&after=<cursor>` on the counted route returns the same `totalCount` on every page. Stop the server with Ctrl-C in its terminal.
 
+If port 8080 is occupied, start the same example on a free port from the
+repository root. The REPL exposes the startup function from
+`examples/members-server/app/Main.hs`.
+
+```console
+$ cabal repl members-server:exe:members-server
+ghci> serveMembers 48193
+members-server listening on http://localhost:48193
+```
+
+Use that port for the curl checks, then press Ctrl-C and enter `:quit`.
+
 Finally `cabal test all` passes for all five suites.
 
 
@@ -304,7 +328,7 @@ Every step is an additive source edit and can be repeated. The generator command
 
 Milestone 1 leaves the repository uncompilable between adding the field and fixing the construction sites. Do both in one commit.
 
-The single-transaction test inserts a row through a second connection. It must delete that row and release the second connection even when an assertion fails (use `finally` or tasty's `withResource`), because the rest of the group shares the fixture and expects 25 rows. Each test run starts a fresh database, so a failed run leaves nothing behind for the next one.
+The single-transaction test uses an isolated database and inserts a row through a second connection. Its cleanup deletes that row and releases the second connection even when an assertion fails. Each test run starts a fresh database.
 
 If `okf id next` returns a handle other than `ADR-8` because another record was added in the meantime, use the handle it returns and name the file accordingly. Never reuse or guess a handle.
 

@@ -134,7 +134,8 @@ totalCountTests getDb =
             \writer -> do
               let readSnapshot = do
                     n <- run reader (Session.script "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY" *> sqlCount)
-                    run writer (insertRow ("new", snd (head canonical)))
+                    -- The inserted row would sort first in a fresh snapshot.
+                    run writer (insertRow ("new", microsToUtcTime 1767323045123457))
                     page <- run reader (sqlPage <* Session.script "COMMIT")
                     pure (n, page)
                   checkSnapshot = do

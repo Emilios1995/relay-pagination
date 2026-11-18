@@ -250,6 +250,11 @@ The engine wraps the base query in a subquery, appends the keyset `WHERE` in exp
   Date: 2026-07-15
 
 
+- Decision: Add opt-in `totalCount` in 0.2.0.0 under [ADR-8](../adr/8-opt-in-total-count.md) and [ExecPlan 6](../plans/6-offer-an-opt-in-total-count-on-relay-connections.md).
+  Rationale: GraphQL gateways can require the size of the filtered collection. An independent count statement keeps the cost optional, and the counted response type requires the count in JSON and OpenAPI.
+  Date: 2026-11-18
+
+
 ## Outcomes & Retrospective
 
 **The initiative is complete (2026-07-16): all five ExecPlans (28 milestones) delivered, all in two days.** The Vision & Scope contract holds end-to-end: a developer (or agent) adds a paginated endpoint by declaring a `RelayPage` route in a `NamedRoutes` record, writing a base-query `Snippet`, and declaring a `SortSpec` — the library does argument validation, cursor codec + fingerprint, keyset SQL in expanded lexicographic form, `Connection` assembly, and OpenAPI 3.1. Every failure mode catalogued from the `mls-service-v2` reference implementation is either unrepresentable (no float key type; typed SQL parameters; canonical-order backward pages; probe-row PageInfo) or falsifiable (the conformance suite's six invariants, proven to have teeth against three deliberately broken paginators and an OFFSET paginator under mutation).
@@ -260,7 +265,7 @@ What the decomposition got right: the EP-2 ∥ EP-3 split held perfectly — the
 
 What cost friction: parallel plan authoring drifted on small facts (where the Cursor HTTP instances live, `paginate`'s return type, the openapi-hs repo split) and each drift consumed a reconciliation pass — the Integration Points section and the revision notes were the mechanism that absorbed this, and they earned their keep. Plans quoting concrete API sketches went stale in small ways (missing `cursorToText`, the `ToSchema OpenApi` assumption, `mori registry register`); every one was caught by running code, never by review, which is the initiative's own thesis applied to itself.
 
-Post-completion pointers: release order and its openapi-hs blocker live in the README and ADR 6; the cursor format is v1-pinned by golden tests (bumping is a wire-breaking change per ADR 2); candidate future extensions explicitly out of v1 scope remain `totalCount`, nullable sort keys, HMAC-signed cursors, and a row-value fast path for uniform-direction specs (Decision Log requires a new entry to add any of them).
+Post-completion pointers: release order and its openapi-hs blocker live in the README and ADR 6; the cursor format is v1-pinned by golden tests (bumping is a wire-breaking change per ADR 2). [ADR-8](../adr/8-opt-in-total-count.md) adopts the opt-in count extension. Nullable sort keys, HMAC-signed cursors, and a row-value fast path for uniform-direction specs remain candidate extensions that require a Decision Log entry.
 
 
 ---
