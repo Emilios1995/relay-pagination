@@ -17,6 +17,7 @@ module ToyApi
     toyServer,
     toyApp,
     toyCursor,
+    echoPage,
   )
 where
 
@@ -85,26 +86,27 @@ toyCursor :: Cursor
 toyCursor = Cursor "ZWRnZS0x"
 
 toyServer :: ToyRoutes (AsServerT Handler)
-toyServer = ToyRoutes {items = serveItems}
+toyServer = ToyRoutes {items = pure . ToyPageOk . echoPage}
+
+echoPage :: PageRequest -> Connection Item
+echoPage pr =
+  Connection
+    { edges =
+        [ Edge
+            { node = Item {itemId = pageSize pr, itemName = directionText (direction pr)},
+              cursor = toyCursor
+            }
+        ],
+      pageInfo =
+        PageInfo
+          { hasNextPage = False,
+            hasPreviousPage = False,
+            startCursor = Just toyCursor,
+            endCursor = Just toyCursor
+          },
+      totalCount = Nothing
+    }
   where
-    serveItems pr =
-      pure . ToyPageOk $
-        Connection
-          { edges =
-              [ Edge
-                  { node = Item {itemId = pageSize pr, itemName = directionText (direction pr)},
-                    cursor = toyCursor
-                  }
-              ],
-            pageInfo =
-              PageInfo
-                { hasNextPage = False,
-                  hasPreviousPage = False,
-                  startCursor = Just toyCursor,
-                  endCursor = Just toyCursor
-                },
-            totalCount = Nothing
-          }
     directionText Forward = "forward" :: Text
     directionText Backward = "backward"
 

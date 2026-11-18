@@ -5,7 +5,8 @@
 --
 -- This module is the __canonical (sole permitted) home__ of the OpenAPI
 -- orphan instances for the core @relay-pagination@ types ('Cursor',
--- 'PageInfo', 'Edge', 'Connection') and for 'RelayPageError'. The core
+-- 'PageInfo', 'Edge', 'Connection', 'CountedConnection') and for
+-- 'RelayPageError'. The core
 -- package must not depend on @openapi-hs@, and @openapi-hs@ cannot know
 -- about this library, so orphans are the standard escape hatch — the danger
 -- of orphans is duplicate definitions elsewhere, therefore no other package
@@ -20,7 +21,7 @@
 -- an error the route type omitted.
 module Relay.Pagination.Servant.OpenApi () where
 
-import Control.Lens (at, (&), (.~), (?~))
+import Control.Lens (at, (%~), (&), (.~), (?~))
 import Data.Aeson (toJSON)
 import Data.OpenApi
 import Data.Proxy (Proxy (..))
@@ -124,3 +125,11 @@ instance (ToSchema a) => ToSchema (Connection a) where
   declareNamedSchema proxy = do
     NamedSchema connectionName connectionSchema <- genericDeclareNamedSchema defaultSchemaOptions proxy
     pure $ NamedSchema connectionName (connectionSchema & properties . at "totalCount" .~ Nothing)
+
+instance (ToSchema a) => ToSchema (CountedConnection a) where
+  declareNamedSchema _ = do
+    NamedSchema connectionName connectionSchema <- genericDeclareNamedSchema defaultSchemaOptions (Proxy @(Connection a))
+    pure $
+      NamedSchema
+        (("Counted" <>) <$> connectionName)
+        (connectionSchema & required %~ (<> ["totalCount"]))

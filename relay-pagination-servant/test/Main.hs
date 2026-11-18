@@ -3,6 +3,7 @@
 module Main (main) where
 
 import Control.Lens ((^.), (^..))
+import CountedToyApi
 import Data.Aeson qualified as Aeson
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString.Lazy (ByteString)
@@ -15,6 +16,7 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Network.HTTP.Client qualified as HttpClient
 import Network.HTTP.Types (statusCode)
+import Network.Wai (Application)
 import Network.Wai.Handler.Warp (testWithApplication)
 import Relay.Pagination
 import Relay.Pagination.Servant
@@ -25,7 +27,7 @@ import Servant.Links (safeLink)
 import Test.Tasty
 import Test.Tasty.HUnit
 import ToyApi
-import ToyOpenApi (renderToyOpenApi, toyOpenApi)
+import ToyOpenApi (countedToyOpenApi, renderCountedToyOpenApi, renderToyOpenApi, toyOpenApi)
 import Web.HttpApiData (toUrlPiece)
 
 main :: IO ()
@@ -33,7 +35,7 @@ main =
   defaultMain $
     testGroup
       "relay-pagination-servant"
-      [serverTests, clientTests, linkTests, openapiTests]
+      [serverTests, clientTests, linkTests, openapiTests, countedTests]
 
 -- * The RelayPage HasServer instance, over real HTTP (M2)
 
@@ -233,14 +235,67 @@ openapiTests =
           parameter = Just "last"
         }
 
+-- * Counted connections
+
+countedTests :: TestTree
+countedTests =
+  testGroup
+    "counted connections"
+    [ testCase "counted artifact matches generator" $ do
+        checked <- LBS.readFile "test/golden/toy-counted-openapi.json"
+        checked @?= renderCountedToyOpenApi,
+      testCase "counted schema requires a non-negative integer totalCount" $
+        case InsOrd.lookup "CountedConnection_Item" countedSchemas of
+          Nothing -> assertFailure "missing CountedConnection_Item schema"
+          Just s -> do
+            assertBool "totalCount is required" ("totalCount" `elem` (s ^. OpenApi.required))
+            case InsOrd.lookup "totalCount" (s ^. OpenApi.properties) of
+              Just (OpenApi.Inline count) -> do
+                count ^. OpenApi.type_ @?= Just (OpenApi.OpenApiTypeSingle OpenApi.OpenApiInteger)
+                count ^. OpenApi.minimum_ @?= Just 0
+              other -> assertFailure ("expected an inline totalCount schema, got " <> show other),
+      testCase "uncounted path and schema match the original document" $ do
+        let originalSchemas = toyOpenApi ^. OpenApi.components . OpenApi.schemas
+        case InsOrd.lookup "Connection_Item" countedSchemas of
+          Nothing -> assertFailure "missing Connection_Item schema"
+          Just s -> do
+            Just s @?= InsOrd.lookup "Connection_Item" originalSchemas
+            InsOrd.lookup "totalCount" (s ^. OpenApi.properties) @?= Nothing
+        let itemsPath doc = InsOrd.lookup "/items" (doc ^. OpenApi.paths)
+        itemsPath countedToyOpenApi @?= itemsPath toyOpenApi,
+      testCase "counted JSON validates against its schema" $
+        OpenApi.validateToJSON (countedConnection 42 (echoPage request)) @?= [],
+      withApp countedToyApp "counted route returns totalCount over raw HTTP" "/counted-items?first=7" \(status, body) -> do
+        status @?= 200
+        raw <- decodeOk @Aeson.Object body
+        KeyMap.lookup "totalCount" raw @?= Just (Aeson.Number 42)
+        decodeOk @(CountedConnection Item) body >>= (@?= countedConnection 42 (echoPage request)),
+      testCase "typed client decodes a counted connection" $
+        testWithApplication (pure countedToyApp) \port -> do
+          manager <- HttpClient.newManager HttpClient.defaultManagerSettings
+          let env = mkClientEnv manager (BaseUrl Http "127.0.0.1" port "")
+          result <- runClientM (countedItems countedClient (forwardPage 7 Nothing)) env
+          case result of
+            Right (CountedToyOk conn) -> conn @?= countedConnection 42 (echoPage request)
+            other -> assertFailure ("expected CountedToyOk, got " <> show other)
+    ]
+  where
+    request = PageRequest {pageSize = 7, direction = Forward, cursor = Nothing}
+    countedSchemas = countedToyOpenApi ^. OpenApi.components . OpenApi.schemas
+    countedClient :: CountedToyRoutes (AsClientT ClientM)
+    countedClient = genericClient
+
 -- * Helpers
 
 -- | Run the toy app on a free port and hit it with one raw HTTP request, so
 -- malformed query strings reach the combinator verbatim.
 withToy :: TestName -> Text -> ((Int, ByteString) -> Assertion) -> TestTree
-withToy name pathAndQuery check =
+withToy = withApp toyApp
+
+withApp :: Application -> TestName -> Text -> ((Int, ByteString) -> Assertion) -> TestTree
+withApp app name pathAndQuery check =
   testCase name $
-    testWithApplication (pure toyApp) \port -> do
+    testWithApplication (pure app) \port -> do
       manager <- HttpClient.newManager HttpClient.defaultManagerSettings
       request <-
         HttpClient.parseRequest
