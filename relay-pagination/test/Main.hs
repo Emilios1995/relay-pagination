@@ -3,6 +3,7 @@
 module Main (main) where
 
 import Data.Aeson qualified as Aeson
+import Data.List (isInfixOf)
 import Data.Maybe (fromJust)
 import Data.UUID.Types qualified as UUID
 import Relay.Pagination
@@ -53,27 +54,49 @@ connectionJsonTests =
     "Connection JSON"
     [ testCase "Relay-conventional shape, exact bytes" $
         Aeson.encode exampleConnection
-          @?= "{\"edges\":[\
-              \{\"node\":\"first\",\"cursor\":\"eyJ2IjoxLCJmIjo3LCJrIjpbeyJ0IjoiaSIsInYiOjF9XX0\"},\
-              \{\"node\":\"second\",\"cursor\":\"eyJ2IjoxLCJmIjo3LCJrIjpbeyJ0IjoiaSIsInYiOjJ9XX0\"}],\
-              \\"pageInfo\":{\"hasNextPage\":true,\"hasPreviousPage\":false,\
-              \\"startCursor\":\"eyJ2IjoxLCJmIjo3LCJrIjpbeyJ0IjoiaSIsInYiOjF9XX0\",\
-              \\"endCursor\":\"eyJ2IjoxLCJmIjo3LCJrIjpbeyJ0IjoiaSIsInYiOjJ9XX0\"}}",
+          @?= exampleJsonPrefix <> "}",
       testCase "empty page has null cursors" $
-        Aeson.encode (Connection {edges = [], pageInfo = PageInfo False False Nothing Nothing} :: Connection Bool)
+        Aeson.encode (Connection {edges = [], pageInfo = PageInfo False False Nothing Nothing, totalCount = Nothing} :: Connection Bool)
           @?= "{\"edges\":[],\"pageInfo\":{\"hasNextPage\":false,\"hasPreviousPage\":false,\
               \\"startCursor\":null,\"endCursor\":null}}",
       testCase "Connection JSON round-trips" $
-        Aeson.decode (Aeson.encode exampleConnection) @?= Just exampleConnection
+        Aeson.decode (Aeson.encode exampleConnection) @?= Just exampleConnection,
+      testCase "count is appended in the counted encoding" $ do
+        Aeson.encode counted @?= withCount "42"
+        Aeson.decode (withCount "42") @?= Just (exampleConnection {totalCount = Just 42})
+        Aeson.decode (withCount "42") @?= Just counted,
+      testCase "null totalCount decodes as absent" $
+        Aeson.decode (withCount "null") @?= Just exampleConnection,
+      testCase "negative and fractional counts are rejected" $ do
+        Aeson.decode @(Connection String) (withCount "-1") @?= Nothing
+        Aeson.decode @(Connection String) (withCount "1.5") @?= Nothing,
+      testCase "CountedConnection requires totalCount" $ do
+        fromConnection exampleConnection @?= Nothing
+        countedTotal counted @?= 42
+        fromConnection (toConnection counted) @?= Just counted
+        mapM_ assertMissing [Aeson.encode exampleConnection, withCount "null"]
     ]
   where
     c1 = encodeCursor (CursorPayload 1 7 [KvInt 1])
     c2 = encodeCursor (CursorPayload 1 7 [KvInt 2])
+    counted = countedConnection 42 exampleConnection
+    exampleJsonPrefix =
+      "{\"edges\":[\
+      \{\"node\":\"first\",\"cursor\":\"eyJ2IjoxLCJmIjo3LCJrIjpbeyJ0IjoiaSIsInYiOjF9XX0\"},\
+      \{\"node\":\"second\",\"cursor\":\"eyJ2IjoxLCJmIjo3LCJrIjpbeyJ0IjoiaSIsInYiOjJ9XX0\"}],\
+      \\"pageInfo\":{\"hasNextPage\":true,\"hasPreviousPage\":false,\
+      \\"startCursor\":\"eyJ2IjoxLCJmIjo3LCJrIjpbeyJ0IjoiaSIsInYiOjF9XX0\",\
+      \\"endCursor\":\"eyJ2IjoxLCJmIjo3LCJrIjpbeyJ0IjoiaSIsInYiOjJ9XX0\"}"
+    withCount value = exampleJsonPrefix <> ",\"totalCount\":" <> value <> "}"
+    assertMissing bytes = case Aeson.eitherDecode @(CountedConnection String) bytes of
+      Left err -> assertBool err ("totalCount" `isInfixOf` err)
+      Right result -> assertFailure ("unexpected counted connection: " <> show result)
     exampleConnection :: Connection String
     exampleConnection =
       Connection
         { edges = [Edge "first" c1, Edge "second" c2],
-          pageInfo = PageInfo True False (Just c1) (Just c2)
+          pageInfo = PageInfo True False (Just c1) (Just c2),
+          totalCount = Nothing
         }
 
 -- * Cursor codec (M4)

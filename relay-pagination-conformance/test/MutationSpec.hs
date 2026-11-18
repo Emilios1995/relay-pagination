@@ -246,7 +246,8 @@ offsetFetch conn PageRequest {pageSize = size, direction = dir, cursor = mCursor
               endCursor = case reverse edgeList of
                 Edge {cursor = c} : _ -> Just c
                 [] -> Nothing
-            }
+            },
+        totalCount = Nothing
       }
 
 offsetStatement :: Statement (Int64, Int64) [TestRow]

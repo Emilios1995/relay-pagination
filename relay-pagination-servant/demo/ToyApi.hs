@@ -102,7 +102,8 @@ toyServer = ToyRoutes {items = serveItems}
                   hasPreviousPage = False,
                   startCursor = Just toyCursor,
                   endCursor = Just toyCursor
-                }
+                },
+            totalCount = Nothing
           }
     directionText Forward = "forward" :: Text
     directionText Backward = "backward"

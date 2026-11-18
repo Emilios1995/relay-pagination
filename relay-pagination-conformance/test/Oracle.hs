@@ -52,7 +52,8 @@ oraclePaginate cursorOf rows PageRequest {pageSize = size, direction = dir, curs
                 endCursor = case reverse slice of
                   r : _ -> Just (Cursor (cursorOf r))
                   [] -> Nothing
-              }
+              },
+          totalCount = Nothing
         }
 
     lastN n xs = drop (max 0 (length xs - n)) xs

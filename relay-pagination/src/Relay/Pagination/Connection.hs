@@ -3,10 +3,15 @@
 -- | The Relay connection response envelope. JSON encoding follows the Relay
 -- convention exactly: {"edges":[{"node":...,"cursor":"..."}],"pageInfo":
 -- {"hasNextPage":...,"hasPreviousPage":...,"startCursor":...,"endCursor":...}}
--- with null cursors on empty pages. Encodings are hand-written with fixed
--- field order so tests can pin exact bytes.
+-- with null cursors on empty pages. When present, the optional count is
+-- encoded last as @totalCount@. Encodings use a fixed field order.
 module Relay.Pagination.Connection
   ( Connection (..),
+    CountedConnection,
+    countedConnection,
+    fromConnection,
+    toConnection,
+    countedTotal,
     Edge (..),
     PageInfo (..),
   )
@@ -15,6 +20,7 @@ where
 import Data.Aeson ((.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import GHC.Generics (Generic)
+import Numeric.Natural (Natural)
 import Relay.Pagination.Cursor (Cursor)
 
 -- | One returned row ('node') plus the cursor that addresses its position.
@@ -69,14 +75,54 @@ instance Aeson.FromJSON PageInfo where
 -- endpoint's canonical sort order regardless of paging direction.
 data Connection a = Connection
   { edges :: ![Edge a],
-    pageInfo :: !PageInfo
+    pageInfo :: !PageInfo,
+    -- | The size of the whole filtered collection, when requested.
+    totalCount :: !(Maybe Natural)
   }
   deriving stock (Eq, Show, Functor, Foldable, Traversable, Generic)
 
 instance (Aeson.ToJSON a) => Aeson.ToJSON (Connection a) where
-  toJSON c = Aeson.object ["edges" .= edges c, "pageInfo" .= pageInfo c]
-  toEncoding c = Aeson.pairs ("edges" .= edges c <> "pageInfo" .= pageInfo c)
+  toJSON c =
+    Aeson.object $
+      ["edges" .= edges c, "pageInfo" .= pageInfo c]
+        <> maybe [] (pure . ("totalCount" .=)) (totalCount c)
+  toEncoding c =
+    Aeson.pairs
+      ( "edges" .= edges c
+          <> "pageInfo" .= pageInfo c
+          <> foldMap ("totalCount" .=) (totalCount c)
+      )
 
 instance (Aeson.FromJSON a) => Aeson.FromJSON (Connection a) where
   parseJSON = Aeson.withObject "Connection" \o ->
-    Connection <$> o .: "edges" <*> o .: "pageInfo"
+    Connection <$> o .: "edges" <*> o .: "pageInfo" <*> o .:? "totalCount"
+
+-- | A connection with a required total count.
+newtype CountedConnection a = CountedConnection (Connection a)
+  deriving stock (Eq, Show, Functor, Foldable, Traversable)
+
+-- | Attach a count, replacing any existing count.
+countedConnection :: Natural -> Connection a -> CountedConnection a
+countedConnection n c = CountedConnection (c {totalCount = Just n})
+
+-- | Require a count on an existing connection.
+fromConnection :: Connection a -> Maybe (CountedConnection a)
+fromConnection c = CountedConnection c <$ totalCount c
+
+-- | Recover the connection, whose 'totalCount' is always 'Just'.
+toConnection :: CountedConnection a -> Connection a
+toConnection (CountedConnection c) = c
+
+-- | The size of the whole filtered collection.
+countedTotal :: CountedConnection a -> Natural
+countedTotal (CountedConnection Connection {totalCount = Just n}) = n
+countedTotal _ = error "CountedConnection invariant violated: missing totalCount"
+
+instance (Aeson.ToJSON a) => Aeson.ToJSON (CountedConnection a) where
+  toJSON = Aeson.toJSON . toConnection
+  toEncoding = Aeson.toEncoding . toConnection
+
+instance (Aeson.FromJSON a) => Aeson.FromJSON (CountedConnection a) where
+  parseJSON value = do
+    c <- Aeson.parseJSON value
+    maybe (fail "CountedConnection requires totalCount") pure (fromConnection c)

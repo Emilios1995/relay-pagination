@@ -39,7 +39,7 @@ brokenBoundary cursorOf rows req@PageRequest {pageSize = size, direction = dir} 
           PageInfo {hasNextPage = full, hasPreviousPage = prevFlag, startCursor = sc, endCursor = ec}
         Backward ->
           PageInfo {hasNextPage = nextFlag, hasPreviousPage = full, startCursor = sc, endCursor = ec}
-   in Connection {edges = edges correct, pageInfo = dishonest}
+   in Connection {edges = edges correct, pageInfo = dishonest, totalCount = Nothing}
 
 -- | The reference implementation's third failure mode: backward pages
 -- returned in reversed (SQL-flipped) order, start/end cursors swapped to
@@ -64,7 +64,8 @@ brokenBackwardOrder cursorOf rows req@PageRequest {direction = dir} =
                         hasPreviousPage = prevFlag,
                         startCursor = ec,
                         endCursor = sc
-                      }
+                      },
+                  totalCount = Nothing
                 }
 
 -- | A row whose sort key is an exact integer-microsecond timestamp; ordered
@@ -114,7 +115,8 @@ brokenFloatCursor rows PageRequest {pageSize = size, direction = dir, cursor = m
                 hasPreviousPage = False,
                 startCursor = Nothing,
                 endCursor = Nothing
-              }
+              },
+          totalCount = Nothing
         }
     Forward ->
       let rest = case mCursor of
@@ -144,5 +146,6 @@ brokenFloatCursor rows PageRequest {pageSize = size, direction = dir, cursor = m
                     endCursor = case reverse slice of
                       r : _ -> Just (Cursor (floatCursorBytes r))
                       [] -> Nothing
-                  }
+                  },
+              totalCount = Nothing
             }

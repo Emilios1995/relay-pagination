@@ -45,7 +45,8 @@ tests =
                           hasPreviousPage = False,
                           startCursor = Just (cursorFor 1),
                           endCursor = Nothing
-                        }
+                        },
+                    totalCount = Nothing
                   }
         result <- walkForward missing 3
         failureOf result @?= WalkMissingCursor 0
@@ -72,7 +73,8 @@ tests =
                 hasPreviousPage = False,
                 startCursor = Just (cursorFor 42),
                 endCursor = Just (cursorFor 42)
-              }
+              },
+          totalCount = Nothing
         }
 
     pageWithEnd bytes =
@@ -84,7 +86,8 @@ tests =
                 hasPreviousPage = False,
                 startCursor = Just (Cursor bytes),
                 endCursor = Just (Cursor bytes)
-              }
+              },
+          totalCount = Nothing
         }
 
 -- | The shared oracle wired as a 'FetchPage' over a list of Ints.

@@ -105,7 +105,8 @@ clientTests =
                         hasPreviousPage = False,
                         startCursor = Just toyCursor,
                         endCursor = Just toyCursor
-                      }
+                      },
+                  totalCount = Nothing
                 }
           other -> assertFailure ("expected ToyPageOk, got " <> show other),
       withToyClient "typed backward round trip" (backwardPage 3 (Just toyCursor)) \result ->
@@ -219,7 +220,8 @@ openapiTests =
                 hasPreviousPage = False,
                 startCursor = Just toyCursor,
                 endCursor = Just toyCursor
-              }
+              },
+          totalCount = Nothing
         }
 
     exampleError :: RelayPageError

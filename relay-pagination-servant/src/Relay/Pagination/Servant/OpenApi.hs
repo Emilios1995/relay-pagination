@@ -20,7 +20,7 @@
 -- an error the route type omitted.
 module Relay.Pagination.Servant.OpenApi () where
 
-import Control.Lens ((&), (.~), (?~))
+import Control.Lens (at, (&), (.~), (?~))
 import Data.Aeson (toJSON)
 import Data.OpenApi
 import Data.Proxy (Proxy (..))
@@ -121,4 +121,6 @@ instance (ToSchema a) => ToSchema (Edge a) where
   declareNamedSchema = genericDeclareNamedSchema defaultSchemaOptions
 
 instance (ToSchema a) => ToSchema (Connection a) where
-  declareNamedSchema = genericDeclareNamedSchema defaultSchemaOptions
+  declareNamedSchema proxy = do
+    NamedSchema connectionName connectionSchema <- genericDeclareNamedSchema defaultSchemaOptions proxy
+    pure $ NamedSchema connectionName (connectionSchema & properties . at "totalCount" .~ Nothing)

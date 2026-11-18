@@ -59,7 +59,7 @@ mintCursor spec@(SortSpec cols) row =
 -- cursor was minted from is itself behind you).
 mkConnection :: SortSpec row -> PageRequest -> [row] -> Connection row
 mkConnection spec PageRequest {pageSize, direction, cursor} rows =
-  Connection {edges, pageInfo}
+  Connection {edges, pageInfo, totalCount = Nothing}
   where
     probe = length rows > pageSize
     kept = take pageSize rows
