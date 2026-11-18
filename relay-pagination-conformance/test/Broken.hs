@@ -8,6 +8,9 @@ module Broken
     floatCursorBytes,
     floatRoundTripMicros,
     brokenFloatCursor,
+    brokenRemainingCount,
+    brokenWrongCount,
+    brokenMissingCount,
   )
 where
 
@@ -18,6 +21,25 @@ import Data.Text (Text)
 import Data.Text.Encoding qualified as Text
 import Oracle (oraclePaginate)
 import Relay.Pagination
+
+-- | Misreport the count as the number of rows left in the walk direction.
+brokenRemainingCount :: (row -> ByteString) -> [row] -> PageRequest -> Connection row
+brokenRemainingCount cursorOf rows req@PageRequest {direction, cursor = mCursor} =
+  let remaining = case mCursor of
+        Nothing -> rows
+        Just c -> case direction of
+          Forward -> drop 1 (dropWhile (not . matches c) rows)
+          Backward -> takeWhile (not . matches c) rows
+      matches c row = Cursor (cursorOf row) == c
+   in (oraclePaginate cursorOf rows req) {totalCount = Just (fromIntegral (length remaining))}
+
+brokenWrongCount :: (row -> ByteString) -> [row] -> PageRequest -> Connection row
+brokenWrongCount cursorOf rows req =
+  (oraclePaginate cursorOf rows req) {totalCount = Just (fromIntegral (length rows) + 1)}
+
+-- | A correct uncounted endpoint, used where the caller requires a count.
+brokenMissingCount :: (row -> ByteString) -> [row] -> PageRequest -> Connection row
+brokenMissingCount = oraclePaginate
 
 -- | Production Bug A verbatim: delegate to the correct oracle, then
 -- overwrite the walk-direction boundary flag with @length == pageSize@.

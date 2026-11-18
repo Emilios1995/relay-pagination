@@ -1,7 +1,7 @@
 {-# LANGUAGE BlockArguments #-}
 
 -- | The invariant checker: walk an endpoint forward (and backward), then
--- assert the six conformance invariants against the expected result set.
+-- assert the enabled conformance invariants against the expected result set.
 -- Each invariant guards a way infinite scrolling breaks in production:
 --
 -- ['Completeness'] The forward walk returns exactly the expected rows —
@@ -40,6 +40,10 @@
 -- if it disagrees with the edges, the next request continues from the
 -- wrong position.
 --
+-- ['TotalCountConsistency'] With 'checkTotalCount' enabled, every page
+-- in each enabled walk reports the number of distinct forward-walk keys.
+-- This check assumes the dataset stays stable throughout the walks.
+--
 -- A walk that aborts ('WalkFailure') is reported under 'WalkTerminated' —
 -- a paginator that loops forever is maximally non-conformant.
 module Relay.Pagination.Conformance.Check
@@ -56,8 +60,10 @@ where
 
 import Data.List (isInfixOf)
 import Data.Map.Strict qualified as Map
+import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Numeric.Natural (Natural)
 import Relay.Pagination
 import Relay.Pagination.Conformance.Walk
 
@@ -70,21 +76,24 @@ data ConformanceConfig = ConformanceConfig
     -- | Off for forward-only endpoints.
     checkBackward :: !Bool,
     -- | Off when the source mutates during the run.
-    checkDeterminism :: !Bool
+    checkDeterminism :: !Bool,
+    -- | Opt in for counted endpoints over a stable dataset.
+    checkTotalCount :: !Bool
   }
   deriving stock (Eq, Show)
 
--- | All checks on, walker cap 10 000.
+-- | Total count checking off, all other checks on, walker cap 10 000.
 defaultConformanceConfig :: Int -> ConformanceConfig
 defaultConformanceConfig size =
   ConformanceConfig
     { pageSize = size,
       maxWalkPages = 10000,
       checkBackward = True,
-      checkDeterminism = True
+      checkDeterminism = True,
+      checkTotalCount = False
     }
 
--- | The six invariants (see the module haddock), plus 'WalkTerminated' for
+-- | The seven invariants (see the module haddock), plus 'WalkTerminated' for
 -- walks that abort.
 data InvariantName
   = Completeness
@@ -94,6 +103,7 @@ data InvariantName
   | EdgeOrderInvariance
   | PageInfoCursorConsistency
   | WalkTerminated
+  | TotalCountConsistency
   deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | One observed violation.
@@ -154,7 +164,8 @@ checkConformance config keyOf fetchPage expected = do
         { pageSize = size,
           maxWalkPages = cap,
           checkBackward = doBackward,
-          checkDeterminism = doDeterminism
+          checkDeterminism = doDeterminism,
+          checkTotalCount = doTotalCount
         } = config
       walkConfig = WalkConfig {maxWalkPages = cap}
       expectedKeys = map keyOf expected
@@ -168,6 +179,10 @@ checkConformance config keyOf fetchPage expected = do
             pagesWalked = 0
           }
     Right forward -> do
+      let distinctKeys = Set.fromList [keyOf n | Edge {node = n} <- walkEdges forward]
+          countViolations whichWalk pages
+            | doTotalCount = totalCountViolations (fromIntegral (Set.size distinctKeys)) whichWalk pages
+            | otherwise = []
       determinismViolations <-
         if doDeterminism
           then determinismCheck keyOf fetchPage forward
@@ -182,7 +197,8 @@ checkConformance config keyOf fetchPage expected = do
                 ( symmetryViolations keyOf forward backward
                     <> boundaryViolations "hasPreviousPage" (null expected) (walkPages backward)
                     <> orderViolations keyOf expectedKeys "backward" (walkPages backward)
-                    <> pageInfoViolations "backward" (walkPages backward),
+                    <> pageInfoViolations "backward" (walkPages backward)
+                    <> countViolations "backward" (walkPages backward),
                   length (walkPages backward)
                 )
           else pure ([], 0)
@@ -193,6 +209,7 @@ checkConformance config keyOf fetchPage expected = do
                 <> boundaryViolations "hasNextPage" (null expected) (walkPages forward)
                 <> orderViolations keyOf expectedKeys "forward" (walkPages forward)
                 <> pageInfoViolations "forward" (walkPages forward)
+                <> countViolations "forward" (walkPages forward)
                 <> backwardViolations
                 <> determinismViolations,
             pagesWalked = length (walkPages forward) + backwardPages
@@ -380,6 +397,24 @@ determinismCheck keyOf fetchPage forward =
             [violation "edge cursor sequence" | firstCursors /= againCursors],
             [violation "PageInfo" | pageInfo (pageOf w) /= pageInfo again]
           ]
+
+-- | Invariant 7: every walked page declares the distinct forward key count.
+totalCountViolations :: Natural -> Text -> [WalkedPage row] -> [ConformanceViolation]
+totalCountViolations expectedCount whichWalk pages =
+  [ ConformanceViolation
+      { invariant = TotalCountConsistency,
+        pageIndex = Just (indexOf w),
+        detail =
+          whichWalk
+            <> " page: expected totalCount "
+            <> tshow expectedCount
+            <> ", "
+            <> maybe "totalCount is missing" (\n -> "got " <> tshow n) actual
+      }
+  | w <- pages,
+    let actual = totalCount (pageOf w),
+    actual /= Just expectedCount
+  ]
 
 -- * Field access helpers (DuplicateRecordFields makes bare selectors ambiguous here)
 

@@ -14,6 +14,7 @@ module DbFixture
     resetRows,
     insertRows,
     fetchViaEngine,
+    fetchCountedViaEngine,
     testSortSpec,
     testRowDecoder,
     run,
@@ -38,12 +39,14 @@ import Hasql.Encoders qualified as Encoders
 import Hasql.Session qualified as Session
 import Hasql.Statement (Statement)
 import Hasql.Statement qualified as Statement
-import Relay.Pagination (Connection, PageRequest)
+import Relay.Pagination (Connection, CountedConnection, PageRequest, countedConnection)
 import Relay.Pagination.Hasql
-  ( KeyColumn (..),
+  ( CountedPage (..),
+    KeyColumn (..),
     SortDirection (..),
     SortSpec (..),
     paginate,
+    paginateCounted,
     timestamptzKey,
     uuidKey,
   )
@@ -90,6 +93,17 @@ fetchViaEngine conn req =
   case paginate testSortSpec req baseQuery testRowDecoder of
     Left err -> fail ("cursor rejected by the engine: " <> show err)
     Right stmt -> run conn (Session.statement () stmt)
+
+-- | Counted variant for the stable database and HTTP fixtures.
+fetchCountedViaEngine :: HasqlConn.Connection -> PageRequest -> IO (CountedConnection TestRow)
+fetchCountedViaEngine conn req =
+  case paginateCounted testSortSpec req baseQuery testRowDecoder of
+    Left err -> fail ("cursor rejected by the engine: " <> show err)
+    Right p ->
+      run conn $
+        countedConnection
+          <$> Session.statement () (countStatement p)
+          <*> Session.statement () (pageStatement p)
 
 -- | One cached-initdb server plus one connection, with the schema created.
 acquireDb :: IO (Pg.Database, HasqlConn.Connection)

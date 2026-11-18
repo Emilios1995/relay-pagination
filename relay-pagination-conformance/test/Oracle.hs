@@ -4,7 +4,7 @@
 --
 -- Cursors are a stable per-row token (the row's unique key rendered to
 -- bytes), never a positional offset.
-module Oracle (oraclePaginate) where
+module Oracle (oraclePaginate, oracleCounted) where
 
 import Data.ByteString (ByteString)
 import Data.Maybe (isJust)
@@ -57,3 +57,7 @@ oraclePaginate cursorOf rows PageRequest {pageSize = size, direction = dir, curs
         }
 
     lastN n xs = drop (max 0 (length xs - n)) xs
+
+oracleCounted :: (row -> ByteString) -> [row] -> PageRequest -> Connection row
+oracleCounted cursorOf rows req =
+  (oraclePaginate cursorOf rows req) {totalCount = Just (fromIntegral (length rows))}

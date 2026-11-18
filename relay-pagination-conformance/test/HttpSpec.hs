@@ -8,6 +8,7 @@
 -- JSON round-trip do not perturb the conformance guarantees.
 module HttpSpec (tests) where
 
+import Control.Exception (onException)
 import Control.Monad.IO.Class (liftIO)
 import Data.List (sortBy)
 import Data.Proxy (Proxy (..))
@@ -27,26 +28,26 @@ import Relay.Pagination.Servant
 import Servant (Application, serve)
 import Servant.API (JSON, NamedRoutes, StdMethod (GET), (:-), (:>))
 import Servant.API.MultiVerb (AsUnion (..), MultiVerb, Respond)
-import Servant.Client (BaseUrl (..), ClientM, Scheme (Http), mkClientEnv, runClientM)
+import Servant.Client (BaseUrl (..), ClientEnv, ClientM, Scheme (Http), mkClientEnv, runClientM)
 import Servant.Client.Generic (AsClientT, genericClient)
 import Servant.Server.Generic (AsServerT)
 import Servant.Server.Internal (Handler)
 import Test.Tasty
 import Test.Tasty.HUnit
 
-type RowsPageResponses =
-  '[ Respond 200 "Page of rows" (Connection TestRow),
+type RowsPageResponses page =
+  '[ Respond 200 "Page of rows" page,
      Respond 400 "Invalid pagination" RelayPageError
    ]
 
-data RowsPageResult
-  = RowsPageOk !(Connection TestRow)
+data RowsPageResult page
+  = RowsPageOk !page
   | RowsPageBadRequest !RelayPageError
   deriving stock (Show)
 
 -- | Hand-written, per ADR 1: status/constructor mapping breaks at compile
 -- time if the response list changes.
-instance AsUnion RowsPageResponses RowsPageResult where
+instance AsUnion (RowsPageResponses page) (RowsPageResult page) where
   toUnion = \case
     RowsPageOk value -> Z (I value)
     RowsPageBadRequest err -> S (Z (I err))
@@ -55,12 +56,12 @@ instance AsUnion RowsPageResponses RowsPageResult where
     S (Z (I err)) -> RowsPageBadRequest err
     S (S impossible) -> case impossible of {}
 
+type RowsEndpoint page =
+  RelayPage 5 50 :> MultiVerb 'GET '[JSON] (RowsPageResponses page) (RowsPageResult page)
+
 data RowsRoutes mode = RowsRoutes
-  { rows ::
-      mode
-        :- "rows"
-          :> RelayPage 5 50
-          :> MultiVerb 'GET '[JSON] RowsPageResponses RowsPageResult
+  { rows :: mode :- "rows" :> RowsEndpoint (Connection TestRow),
+    countedRows :: mode :- "counted-rows" :> RowsEndpoint (CountedConnection TestRow)
   }
   deriving stock (Generic)
 
@@ -71,7 +72,10 @@ rowsApi = Proxy
 
 rowsServer :: HasqlConn.Connection -> RowsRoutes (AsServerT Handler)
 rowsServer conn =
-  RowsRoutes {rows = \pageRequest -> liftIO (RowsPageOk <$> fetchViaEngine conn pageRequest)}
+  RowsRoutes
+    { rows = liftIO . fmap RowsPageOk . fetchViaEngine conn,
+      countedRows = liftIO . fmap RowsPageOk . fetchCountedViaEngine conn
+    }
 
 rowsApp :: HasqlConn.Connection -> Application
 rowsApp conn = serve rowsApi (rowsServer conn)
@@ -88,33 +92,47 @@ toClientPage PageRequest {pageSize = size, direction = dir, cursor = mCursor} =
     Backward -> backwardPage size mCursor
 
 tests :: TestTree
-tests = withResource acquireDb releaseDb \getDb ->
+tests = withResource acquireAndSeed releaseDb \getDb ->
   testGroup
     "http (RelayPage over warp)"
-    [ testCase "conformance walk through servant-client" do
-        (_, conn) <- getDb
-        resetRows conn
-        insertRows conn fixtureRows
-        testWithApplication (pure (rowsApp conn)) \port -> do
-          manager <- HttpClient.newManager HttpClient.defaultManagerSettings
-          let env = mkClientEnv manager (BaseUrl Http "127.0.0.1" port "")
-              fetchPage :: FetchPage TestRow
-              fetchPage req =
-                runClientM (rows rowsClient (toClientPage req)) env >>= \case
-                  Right (RowsPageOk page) -> pure page
-                  Right (RowsPageBadRequest err) ->
-                    fail ("server rejected pagination: " <> show err)
-                  Left clientError -> fail ("transport failure: " <> show clientError)
-          report <-
-            checkConformance
-              (defaultConformanceConfig 5)
-              rowId
-              fetchPage
-              (sortBy canonicalOrder fixtureRows)
-          assertBool
-            (Text.unpack (renderConformanceReport report))
-            (conformancePassed report)
+    [ walkThroughClient getDb "conformance walk through servant-client" config (clientFetch id (rows rowsClient)),
+      walkThroughClient
+        getDb
+        "counted conformance walk through servant-client"
+        (config {checkTotalCount = True})
+        (clientFetch toConnection (countedRows rowsClient))
     ]
+  where
+    config = defaultConformanceConfig 5
+    acquireAndSeed = do
+      resource@(_, conn) <- acquireDb
+      insertRows conn fixtureRows `onException` releaseDb resource
+      pure resource
+
+walkThroughClient ::
+  IO (db, HasqlConn.Connection) ->
+  TestName ->
+  ConformanceConfig ->
+  (ClientEnv -> FetchPage TestRow) ->
+  TestTree
+walkThroughClient getDb name config fetch = testCase name do
+  (_, conn) <- getDb
+  testWithApplication (pure (rowsApp conn)) \port -> do
+    manager <- HttpClient.newManager HttpClient.defaultManagerSettings
+    let env = mkClientEnv manager (BaseUrl Http "127.0.0.1" port "")
+    report <- checkConformance config rowId (fetch env) (sortBy canonicalOrder fixtureRows)
+    assertBool (Text.unpack (renderConformanceReport report)) (conformancePassed report)
+
+clientFetch ::
+  (page -> Connection TestRow) ->
+  (ClientPage -> ClientM (RowsPageResult page)) ->
+  ClientEnv ->
+  FetchPage TestRow
+clientFetch unwrap request env req =
+  runClientM (request (toClientPage req)) env >>= \case
+    Right (RowsPageOk page) -> pure (unwrap page)
+    Right (RowsPageBadRequest err) -> fail ("server rejected pagination: " <> show err)
+    Left clientError -> fail ("transport failure: " <> show clientError)
 
 -- | 25 deterministic rows in the EP-3 integration fixture's adversarial
 -- shape: two ten-way timestamp ties, a microsecond-adjacent pair, three

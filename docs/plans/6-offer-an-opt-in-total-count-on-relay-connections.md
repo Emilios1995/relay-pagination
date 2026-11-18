@@ -48,7 +48,7 @@ The response is a connection with two edges and a trailing `"totalCount":N`, whe
 - [x] (2026-11-18) M1 Core: `Connection` carries an optional count and `CountedConnection` guarantees one; the byte-exact JSON and decode tests pass, including absent and null counts. The baseline and M1 each passed all five suites, and both existing OpenAPI artifacts were byte-identical (AC-1).
 - [x] (2026-11-18) M2 hasql: `paginateCounted` and `totalCountStatement` derive the count from the base query. All 43 hasql tests passed. Both count SQL goldens match the planned statements, and the six existing goldens are byte-identical. The transaction test observed 25 rows inside the snapshot and a count of 26 outside (AC-2, AC-3).
 - [x] (2026-11-18) M3 servant: All 29 tests passed, including the counted schema, raw HTTP and typed client cases. The original `toy-openapi.json` is byte-identical (AC-4).
-- [ ] M4 Conformance: `checkTotalCount` passes for a correct counted endpoint and fails for the three broken count fixtures; the existing broken paginators still fail (AC-5).
+- [x] (2026-11-18) M4 Conformance: All 36 tests passed. The counted oracle, database and typed HTTP walks pass. The three broken count fixtures report only `TotalCountConsistency` at the expected page indices, and the existing broken paginators still trigger their original failures (AC-5).
 - [ ] M5 Example, guides, ADR-8 and release preparation: the example serves `/members/counted`, the guides show it, ADR-8 lifts the v1 exclusion, all packages are at 0.2.0.0, and `cabal test all`, `just check-adr` and `cabal check` are clean (AC-6).
 
 

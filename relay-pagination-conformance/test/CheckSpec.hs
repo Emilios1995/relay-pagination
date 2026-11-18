@@ -8,8 +8,7 @@ import Broken
 import Data.ByteString.Char8 qualified as Char8
 import Data.List (nub, sort)
 import Data.Text qualified as Text
-import Oracle (oraclePaginate)
-import Relay.Pagination
+import Oracle (oracleCounted, oraclePaginate)
 import Relay.Pagination.Conformance.Check
 import Relay.Pagination.Conformance.Tasty (testConformance)
 import Test.Tasty
@@ -74,7 +73,8 @@ tests =
                   { pageSize = 6,
                     maxWalkPages = 10000,
                     checkBackward = False, -- forward-only model
-                    checkDeterminism = True
+                    checkDeterminism = True,
+                    checkTotalCount = False
                   }
                 rowIdent
                 (\req -> pure (brokenFloatCursor rows req))
@@ -96,7 +96,8 @@ tests =
             let names = nub (sort (map invariant (violations report)))
             assertBool "BackwardSymmetry violated" (BackwardSymmetry `elem` names)
             assertBool "EdgeOrderInvariance violated" (EdgeOrderInvariance `elem` names)
-        ]
+        ],
+      totalCountTests
     ]
   where
     forwardOnly3 =
@@ -104,13 +105,41 @@ tests =
         { pageSize = 3,
           maxWalkPages = 10000,
           checkBackward = False,
-          checkDeterminism = True
+          checkDeterminism = True,
+          checkTotalCount = False
         }
-
-    intBytes :: Int -> Char8.ByteString
-    intBytes = Char8.pack . show
 
     identFor n = "f" <> (if n < 10 then "0" else "") <> Text.pack (show n)
 
     -- Around 2026-01-02T03:04:05 UTC in microseconds.
     baseStamp = 1767323045123456
+
+totalCountTests :: TestTree
+totalCountTests =
+  testGroup
+    "total count conformance"
+    [ testGroup
+        "counted oracle passes"
+        [ testCase (show n <> " rows") do
+            report <- checkCount oracleCounted [1 .. n]
+            violations report @?= []
+        | n <- [0, 1, 7 :: Int]
+        ],
+      broken "wrong count" brokenWrongCount [0, 1, 2, 0, 1, 2],
+      broken "count of remaining rows" brokenRemainingCount [1, 2, 1, 2],
+      broken "missing count" brokenMissingCount [0, 1, 2, 0, 1, 2]
+    ]
+  where
+    checkCount paginate rows =
+      checkConformance
+        ((defaultConformanceConfig 3) {checkTotalCount = True})
+        id
+        (pure . paginate intBytes rows)
+        rows
+    broken name paginate pages = testCase name do
+      report <- checkCount paginate [1 .. 7]
+      nub (map invariant (violations report)) @?= [TotalCountConsistency]
+      map pageIndex (violations report) @?= map Just pages
+
+intBytes :: Int -> Char8.ByteString
+intBytes = Char8.pack . show
